@@ -1,0 +1,6 @@
+{
+  "name": "LedgerPulse Expense Tracker",
+  "description": "Smart personal expense tracker with real-time daily spend monitoring, monthly budget pacing, category analytics, and financial ledger management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
