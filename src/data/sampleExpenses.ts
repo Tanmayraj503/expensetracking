@@ -65,6 +65,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Blue Bottle Coffee',
     paymentMethod: 'Digital Wallet',
     notes: 'Morning pour-over and cinnamon roll',
+    tags: ['Personal', 'Routine'],
   },
   {
     id: 'exp-2026-10-29-2',
@@ -75,6 +76,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Trader Joe\'s',
     paymentMethod: 'Credit Card',
     notes: 'Produce and pantry essentials',
+    tags: ['Essential', 'Personal'],
   },
   {
     id: 'exp-2026-10-28-1',
@@ -85,6 +87,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Ramen Nagi',
     paymentMethod: 'Credit Card',
     notes: 'Dinner after gym',
+    tags: ['Personal'],
   },
   {
     id: 'exp-2026-10-28-2',
@@ -94,6 +97,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Transportation',
     merchant: 'Metro Transit Card Refill',
     paymentMethod: 'Digital Wallet',
+    tags: ['Work', 'Commute'],
   },
   {
     id: 'exp-2026-10-27-1',
@@ -104,6 +108,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Uniqlo',
     paymentMethod: 'Credit Card',
     notes: 'Merino wool knitwear for autumn',
+    tags: ['Personal'],
   },
   {
     id: 'exp-2026-10-26-1',
@@ -114,6 +119,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Spotify & Cloud Backup',
     paymentMethod: 'Credit Card',
     isRecurring: true,
+    tags: ['Entertainment', 'Personal'],
   },
   {
     id: 'exp-2026-10-25-1',
@@ -124,6 +130,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Bistro Laurent',
     paymentMethod: 'Credit Card',
     notes: 'Weekend dinner with friends',
+    tags: ['Personal'],
   },
   {
     id: 'exp-2026-10-24-1',
@@ -134,6 +141,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Whole Foods Market',
     paymentMethod: 'Debit Card',
     notes: 'Weekly organic groceries & protein',
+    tags: ['Essential', 'Personal'],
   },
   {
     id: 'exp-2026-10-23-1',
@@ -143,6 +151,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Health & Fitness',
     merchant: 'Climbing Gym Day Pass & Gear',
     paymentMethod: 'Credit Card',
+    tags: ['Wellness', 'Personal'],
   },
   {
     id: 'exp-2026-10-22-1',
@@ -152,6 +161,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Dining & Drinks',
     merchant: 'Sweetgreen Salad',
     paymentMethod: 'Digital Wallet',
+    tags: ['Work', 'Lunch'],
   },
   {
     id: 'exp-2026-10-21-1',
@@ -162,6 +172,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Uber Ride',
     paymentMethod: 'Credit Card',
     notes: 'Ride back from airport meeting',
+    tags: ['Work', 'Project X'],
   },
   {
     id: 'exp-2026-10-20-1',
@@ -172,6 +183,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Cinema & Concessions',
     paymentMethod: 'Credit Card',
     notes: 'Sci-fi premiere ticket x2',
+    tags: ['Entertainment', 'Personal'],
   },
   {
     id: 'exp-2026-10-18-1',
@@ -182,6 +194,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Costco Wholesale',
     paymentMethod: 'Credit Card',
     notes: 'Bulk household essentials and coffee beans',
+    tags: ['Home', 'Essential'],
   },
   {
     id: 'exp-2026-10-16-1',
@@ -191,6 +204,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Dining & Drinks',
     merchant: 'Taco Guild',
     paymentMethod: 'Cash',
+    tags: ['Personal'],
   },
   {
     id: 'exp-2026-10-15-1',
@@ -201,6 +215,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Power & Gas Electric Co.',
     paymentMethod: 'Bank Transfer',
     notes: 'Monthly energy bill',
+    tags: ['Home', 'Essential'],
   },
   {
     id: 'exp-2026-10-14-1',
@@ -211,6 +226,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Fiber Internet Service',
     paymentMethod: 'Credit Card',
     isRecurring: true,
+    tags: ['Work', 'Essential'],
   },
   {
     id: 'exp-2026-10-12-1',
@@ -221,6 +237,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Equinox Gym Membership',
     paymentMethod: 'Bank Transfer',
     isRecurring: true,
+    tags: ['Wellness'],
   },
   {
     id: 'exp-2026-10-10-1',
@@ -231,6 +248,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Amazon Marketplace',
     paymentMethod: 'Credit Card',
     notes: 'Ergonomic desk lamp and cables',
+    tags: ['Work', 'Project X'],
   },
   {
     id: 'exp-2026-10-08-1',
@@ -240,6 +258,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Dining & Drinks',
     merchant: 'Pizzeria Antica',
     paymentMethod: 'Credit Card',
+    tags: ['Personal'],
   },
   {
     id: 'exp-2026-10-05-1',
@@ -249,6 +268,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Groceries',
     merchant: 'Trader Joe\'s',
     paymentMethod: 'Credit Card',
+    tags: ['Essential', 'Personal'],
   },
   {
     id: 'exp-2026-10-03-1',
@@ -258,6 +278,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Transportation',
     merchant: 'Gas Station Fuel',
     paymentMethod: 'Debit Card',
+    tags: ['Commute', 'Essential'],
   },
   {
     id: 'exp-2026-10-01-1',
@@ -269,6 +290,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     paymentMethod: 'Bank Transfer',
     notes: 'Monthly apartment lease',
     isRecurring: true,
+    tags: ['Home', 'Essential'],
   },
 
   // September 2026 (Prior Month for comparisons)
@@ -280,6 +302,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Dining & Drinks',
     merchant: 'Izakaya Sozai',
     paymentMethod: 'Credit Card',
+    tags: ['Personal'],
   },
   {
     id: 'exp-2026-09-28-1',
@@ -289,6 +312,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Groceries',
     merchant: 'Whole Foods Market',
     paymentMethod: 'Credit Card',
+    tags: ['Essential', 'Personal'],
   },
   {
     id: 'exp-2026-09-25-1',
@@ -299,6 +323,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Nike Store',
     paymentMethod: 'Credit Card',
     notes: 'Running shoes',
+    tags: ['Personal', 'Wellness'],
   },
   {
     id: 'exp-2026-09-22-1',
@@ -308,6 +333,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Dining & Drinks',
     merchant: 'Trattoria Stella',
     paymentMethod: 'Credit Card',
+    tags: ['Personal'],
   },
   {
     id: 'exp-2026-09-18-1',
@@ -317,6 +343,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Groceries',
     merchant: 'Costco Wholesale',
     paymentMethod: 'Credit Card',
+    tags: ['Home', 'Essential'],
   },
   {
     id: 'exp-2026-09-15-1',
@@ -326,6 +353,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Utilities',
     merchant: 'Power & Gas Electric Co.',
     paymentMethod: 'Bank Transfer',
+    tags: ['Home', 'Essential'],
   },
   {
     id: 'exp-2026-09-14-1',
@@ -335,6 +363,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Utilities',
     merchant: 'Fiber Internet Service',
     paymentMethod: 'Credit Card',
+    tags: ['Work', 'Essential'],
   },
   {
     id: 'exp-2026-09-12-1',
@@ -344,6 +373,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Health & Fitness',
     merchant: 'Equinox Gym Membership',
     paymentMethod: 'Bank Transfer',
+    tags: ['Wellness'],
   },
   {
     id: 'exp-2026-09-08-1',
@@ -354,6 +384,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     merchant: 'Amtrak Rail Ticket',
     paymentMethod: 'Credit Card',
     notes: 'Weekend conference round-trip',
+    tags: ['Work', 'Travel'],
   },
   {
     id: 'exp-2026-09-05-1',
@@ -363,6 +394,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Groceries',
     merchant: 'Trader Joe\'s',
     paymentMethod: 'Credit Card',
+    tags: ['Essential', 'Personal'],
   },
   {
     id: 'exp-2026-09-01-1',
@@ -372,6 +404,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Housing',
     merchant: 'Highland Park Lofts Rent',
     paymentMethod: 'Bank Transfer',
+    tags: ['Home', 'Essential'],
   },
 
   // August 2026 (Historical baseline)
@@ -383,6 +416,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Dining & Drinks',
     merchant: 'Harvest Table',
     paymentMethod: 'Credit Card',
+    tags: ['Personal'],
   },
   {
     id: 'exp-2026-08-20-1',
@@ -392,6 +426,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Groceries',
     merchant: 'Whole Foods Market',
     paymentMethod: 'Credit Card',
+    tags: ['Essential', 'Personal'],
   },
   {
     id: 'exp-2026-08-15-1',
@@ -401,6 +436,7 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Utilities',
     merchant: 'Power & Gas Electric Co.',
     paymentMethod: 'Bank Transfer',
+    tags: ['Home', 'Essential'],
   },
   {
     id: 'exp-2026-08-01-1',
@@ -410,5 +446,6 @@ export const SAMPLE_EXPENSES: Expense[] = [
     category: 'Housing',
     merchant: 'Highland Park Lofts Rent',
     paymentMethod: 'Bank Transfer',
+    tags: ['Home', 'Essential'],
   },
 ];

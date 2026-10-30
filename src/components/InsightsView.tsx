@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Sparkles,
   TrendingDown,
@@ -15,7 +15,18 @@ import {
   HelpCircle,
   Clock,
   ShieldCheck,
+  Tag,
+  Layers,
+  ChevronRight,
+  Target,
 } from 'lucide-react';
+import {
+  PieChart as RechartsPieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+} from 'recharts';
 import { Expense, BudgetSettings, MonthSummary } from '../types';
 import { formatCurrency, formatMonthYear } from '../utils/formatters';
 
@@ -61,6 +72,46 @@ interface InsightsViewProps {
   selectedYearMonth: string;
   onSelectYearMonth: (ym: string) => void;
   onOpenBudgetModal: () => void;
+  theme?: 'dark' | 'light';
+}
+
+// Accessible high-contrast color palette for common and custom labels
+const LABEL_COLORS: Record<string, string> = {
+  Personal: '#10b981', // emerald
+  Work: '#3b82f6', // blue
+  'Project X': '#8b5cf6', // purple
+  Essential: '#f59e0b', // amber
+  Home: '#6366f1', // indigo
+  Commute: '#06b6d4', // cyan
+  Wellness: '#14b8a6', // teal
+  Travel: '#ec4899', // pink
+  Entertainment: '#f43f5e', // rose
+  Lunch: '#f97316', // orange
+  Routine: '#eab308', // yellow
+  Unlabeled: '#94a3b8', // slate
+};
+
+const FALLBACK_PALETTE = [
+  '#10b981',
+  '#3b82f6',
+  '#8b5cf6',
+  '#f59e0b',
+  '#ec4899',
+  '#06b6d4',
+  '#14b8a6',
+  '#f97316',
+  '#6366f1',
+  '#84cc16',
+  '#a855f7',
+  '#0ea5e9',
+  '#e11d48',
+  '#d97706',
+  '#059669',
+];
+
+function getLabelColor(label: string, index: number): string {
+  if (LABEL_COLORS[label]) return LABEL_COLORS[label];
+  return FALLBACK_PALETTE[index % FALLBACK_PALETTE.length];
 }
 
 export const InsightsView: React.FC<InsightsViewProps> = ({
@@ -69,11 +120,16 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
   selectedYearMonth,
   onSelectYearMonth,
   onOpenBudgetModal,
+  theme = 'dark',
 }) => {
   const [insights, setInsights] = useState<FinancialInsight | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
+
+  // Donut chart state
+  const [labelScope, setLabelScope] = useState<'month' | 'all'>('month');
+  const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
 
   const currency = budgetSettings.currency;
 
@@ -119,7 +175,92 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
   // Available months from expense logs
   const availableMonths = Array.from(
     new Set(expenses.map((e) => e.date.slice(0, 7)))
-  ).sort().reverse();
+  )
+    .sort()
+    .reverse();
+
+  // --------------------------------------------------------------------------
+  // Categorized Label / Tag Donut Chart Calculations
+  // --------------------------------------------------------------------------
+  const scopeExpenses = useMemo(() => {
+    if (labelScope === 'month') {
+      return expenses.filter((e) => e.date.startsWith(selectedYearMonth));
+    }
+    return expenses;
+  }, [expenses, selectedYearMonth, labelScope]);
+
+  const totalScopeSpent = useMemo(() => {
+    return scopeExpenses.reduce((sum, e) => sum + e.amount, 0);
+  }, [scopeExpenses]);
+
+  const labelBreakdown = useMemo(() => {
+    const map = new Map<string, { amount: number; count: number }>();
+
+    scopeExpenses.forEach((exp) => {
+      const tags = exp.tags && exp.tags.length > 0 ? exp.tags : ['Unlabeled'];
+      const splitAmount = exp.amount / tags.length;
+
+      tags.forEach((tag) => {
+        const cleanTag = tag.trim().replace(/^#/, '');
+        const current = map.get(cleanTag) || { amount: 0, count: 0 };
+        map.set(cleanTag, {
+          amount: current.amount + splitAmount,
+          count: current.count + 1,
+        });
+      });
+    });
+
+    const items = Array.from(map.entries()).map(([label, data], idx) => {
+      const percentage = totalScopeSpent > 0 ? (data.amount / totalScopeSpent) * 100 : 0;
+      return {
+        name: label,
+        value: Math.round(data.amount * 100) / 100,
+        count: data.count,
+        percentage,
+        color: getLabelColor(label, idx),
+      };
+    });
+
+    return items.sort((a, b) => b.value - a.value);
+  }, [scopeExpenses, totalScopeSpent]);
+
+  const activeLabelData = hoveredLabel
+    ? labelBreakdown.find((d) => d.name === hoveredLabel)
+    : null;
+
+  // Top label highlight summary
+  const topLabelSummary = useMemo(() => {
+    if (labelBreakdown.length === 0) return 'No tagged expenses in this period.';
+    const top = labelBreakdown[0];
+    const second = labelBreakdown[1];
+
+    if (second) {
+      return (
+        <span>
+          Your top assigned label is{' '}
+          <strong className="text-slate-900 dark:text-white font-semibold">
+            #{top.name}
+          </strong>{' '}
+          ({formatCurrency(top.value, currency)} · {top.percentage.toFixed(1)}%),
+          followed by{' '}
+          <strong className="text-slate-900 dark:text-white font-semibold">
+            #{second.name}
+          </strong>{' '}
+          ({formatCurrency(second.value, currency)} · {second.percentage.toFixed(1)}%).
+        </span>
+      );
+    }
+
+    return (
+      <span>
+        Your primary assigned label is{' '}
+        <strong className="text-slate-900 dark:text-white font-semibold">
+          #{top.name}
+        </strong>{' '}
+        accounting for {formatCurrency(top.value, currency)} ({top.percentage.toFixed(1)}% of expenses).
+      </span>
+    );
+  }, [labelBreakdown, currency]);
 
   return (
     <div className="space-y-6">
@@ -135,7 +276,7 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
             </h2>
           </div>
           <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-            Gemini analyzes transaction trends, spending velocity, and leaks to deliver high-impact tips
+            Deep financial diagnostics, label allocation donut breakdown, and actionable savings strategies
           </p>
         </div>
 
@@ -144,7 +285,7 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
           <select
             value={selectedYearMonth}
             onChange={(e) => onSelectYearMonth(e.target.value)}
-            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500 transition-colors"
+            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 focus:outline-hidden focus:border-emerald-500 transition-colors"
           >
             {availableMonths.map((ym) => (
               <option key={ym} value={ym}>
@@ -160,10 +301,231 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
             disabled={isLoading}
             className="px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-emerald-600 dark:text-emerald-400' : ''}`} />
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${
+                isLoading ? 'animate-spin text-emerald-600 dark:text-emerald-400' : ''
+              }`}
+            />
             <span>{isLoading ? 'Analyzing...' : 'Re-Analyze'}</span>
           </button>
         </div>
+      </div>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* DONUT CHART: EXPENSES CATEGORIZED BY ASSIGNED LABELS / TAGS             */}
+      {/* ---------------------------------------------------------------------- */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 shadow-xs transition-colors space-y-5">
+        {/* Card Header & Scope Selector */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20">
+                <Tag className="w-4 h-4" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                Budget Allocation by Assigned Labels
+              </h3>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+              Visualize total expenses grouped by custom labels (e.g. #Work, #Personal, #Project X)
+            </p>
+          </div>
+
+          {/* Scope Toggle: This Month vs All Time */}
+          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-lg border border-slate-200 dark:border-slate-800 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setLabelScope('month')}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                labelScope === 'month'
+                  ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {formatMonthYear(selectedYearMonth)}
+            </button>
+            <button
+              type="button"
+              onClick={() => setLabelScope('all')}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                labelScope === 'all'
+                  ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              All-Time
+            </button>
+          </div>
+        </div>
+
+        {labelBreakdown.length > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+            {/* Left Column: Recharts Donut Chart */}
+            <div className="lg:col-span-5 relative flex flex-col items-center justify-center p-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800/80 rounded-xl">
+              <div className="w-full h-64 sm:h-72 relative">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RechartsPieChart>
+                    <RechartsTooltip
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-2 rounded-lg shadow-xl text-xs font-mono">
+                              <div className="text-slate-950 dark:text-white font-bold flex items-center gap-1.5">
+                                <span
+                                  className="w-2 h-2 rounded-full inline-block"
+                                  style={{ backgroundColor: data.color }}
+                                />
+                                <span>#{data.name}</span>
+                              </div>
+                              <div className="text-emerald-600 dark:text-emerald-400 font-semibold mt-1">
+                                {formatCurrency(data.value, currency)} ({data.percentage.toFixed(1)}%)
+                              </div>
+                              <div className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
+                                {data.count} {data.count === 1 ? 'transaction' : 'transactions'}
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Pie
+                      data={labelBreakdown}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={68}
+                      outerRadius={98}
+                      paddingAngle={2.5}
+                      dataKey="value"
+                      onMouseEnter={(_, index) =>
+                        setHoveredLabel(labelBreakdown[index]?.name || null)
+                      }
+                      onMouseLeave={() => setHoveredLabel(null)}
+                    >
+                      {labelBreakdown.map((entry, index) => (
+                        <Cell
+                          key={`label-cell-${index}`}
+                          fill={entry.color}
+                          stroke={
+                            hoveredLabel === entry.name
+                              ? '#10b981'
+                              : theme === 'light'
+                              ? '#ffffff'
+                              : '#0f172a'
+                          }
+                          strokeWidth={hoveredLabel === entry.name ? 2.5 : 1.5}
+                          className="transition-all cursor-pointer"
+                        />
+                      ))}
+                    </Pie>
+                  </RechartsPieChart>
+                </ResponsiveContainer>
+
+                {/* Centered Readout inside Donut */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-4">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium truncate max-w-[130px]">
+                    {activeLabelData ? `#${activeLabelData.name}` : 'Total Spend'}
+                  </span>
+                  <span className="text-lg sm:text-xl font-bold font-mono tabular-nums text-slate-950 dark:text-white truncate max-w-[140px]">
+                    {activeLabelData
+                      ? formatCurrency(activeLabelData.value, currency)
+                      : formatCurrency(totalScopeSpent, currency)}
+                  </span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-medium">
+                    {activeLabelData
+                      ? `${activeLabelData.percentage.toFixed(1)}% of total`
+                      : `${labelBreakdown.length} active labels`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono text-center pt-1">
+                Hover or tap donut segments to inspect label allocations
+              </div>
+            </div>
+
+            {/* Right Column: Ranked Labels List & Visual Progress Bars */}
+            <div className="lg:col-span-7 space-y-3.5">
+              {/* Highlight summary banner */}
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 rounded-lg text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5">
+                <PieIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">{topLabelSummary}</div>
+              </div>
+
+              {/* Scrollable Label Cards */}
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {labelBreakdown.map((item) => {
+                  const isHovered = hoveredLabel === item.name;
+
+                  return (
+                    <div
+                      key={item.name}
+                      onMouseEnter={() => setHoveredLabel(item.name)}
+                      onMouseLeave={() => setHoveredLabel(null)}
+                      className={`p-2.5 rounded-lg border transition-all cursor-pointer ${
+                        isHovered
+                          ? 'bg-slate-100 dark:bg-slate-800/80 border-emerald-500/50 shadow-xs'
+                          : 'bg-white dark:bg-slate-950/50 border-slate-200 dark:border-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800/30'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-xs mb-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span
+                            className={`font-semibold truncate ${
+                              isHovered
+                                ? 'text-slate-950 dark:text-white'
+                                : 'text-slate-800 dark:text-slate-200'
+                            }`}
+                          >
+                            #{item.name}
+                          </span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                            · {item.count} {item.count === 1 ? 'transaction' : 'transactions'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 font-mono tabular-nums text-xs shrink-0">
+                          <span className="font-bold text-slate-900 dark:text-white">
+                            {formatCurrency(item.value, currency)}
+                          </span>
+                          <span className="text-slate-500 text-[11px] w-12 text-right font-medium">
+                            {item.percentage.toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Mini Progress Bar */}
+                      <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-300"
+                          style={{
+                            width: `${Math.min(100, Math.max(1.5, item.percentage))}%`,
+                            backgroundColor: item.color,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="p-8 text-center bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-200 dark:border-slate-800">
+            <Tag className="w-8 h-8 text-slate-400 mx-auto mb-2 opacity-60" />
+            <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+              No labeled expenses found
+            </h4>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+              Assign labels like #Work, #Personal, or #Project X to transactions in the Daily Tracker or Ledger to see where your budget is going.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Error state */}
@@ -190,7 +552,10 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 animate-pulse h-36"></div>
+              <div
+                key={i}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 animate-pulse h-36"
+              ></div>
             ))}
           </div>
         </div>
@@ -345,7 +710,9 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
 
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
                       <div className="flex items-center justify-between text-xs font-mono">
-                        <span className="text-slate-500 dark:text-slate-400 text-[11px]">Potential Savings:</span>
+                        <span className="text-slate-500 dark:text-slate-400 text-[11px]">
+                          Potential Savings:
+                        </span>
                         <span className="font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
                           {tip.potentialSavings}
                         </span>
@@ -354,7 +721,8 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
                       <div className="p-2.5 bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-700 dark:text-slate-300 flex items-start gap-2">
                         <ArrowRight className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                         <span className="text-[11px] leading-tight">
-                          <strong className="text-slate-900 dark:text-slate-200">Action:</strong> {tip.actionStep}
+                          <strong className="text-slate-900 dark:text-slate-200">Action:</strong>{' '}
+                          {tip.actionStep}
                         </span>
                       </div>
                     </div>
@@ -445,9 +813,13 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
                     <div className="flex items-center justify-between font-semibold">
                       <span className="text-slate-900 dark:text-white">{adj.category}</span>
                       <div className="flex items-center gap-2 font-mono tabular-nums">
-                        <span className="text-slate-500 dark:text-slate-400">{adj.currentSpending}</span>
+                        <span className="text-slate-500 dark:text-slate-400">
+                          {adj.currentSpending}
+                        </span>
                         <ArrowRight className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                        <span className="text-emerald-600 dark:text-emerald-400">{adj.suggestedBudget}</span>
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          {adj.suggestedBudget}
+                        </span>
                       </div>
                     </div>
                     <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-normal">

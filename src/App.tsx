@@ -461,6 +461,7 @@ export default function App() {
               selectedYearMonth={selectedYearMonth}
               onSelectYearMonth={handleSelectYearMonth}
               onOpenBudgetModal={() => setIsBudgetModalOpen(true)}
+              theme={theme}
             />
           )}
         </main>

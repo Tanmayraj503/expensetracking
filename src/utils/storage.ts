@@ -137,7 +137,29 @@ export function loadExpenses(): Expense[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed;
+      // If expenses in localStorage have no tags (from an earlier turn before sample tags were added),
+      // backfill from SAMPLE_EXPENSES by ID so the user sees rich label breakdowns immediately
+      const sampleTagMap = new Map<string, string[]>();
+      SAMPLE_EXPENSES.forEach((s) => {
+        if (s.tags && s.tags.length > 0) {
+          sampleTagMap.set(s.id, s.tags);
+        }
+      });
+
+      let needsSave = false;
+      const enhanced = parsed.map((e: Expense) => {
+        if ((!e.tags || e.tags.length === 0) && sampleTagMap.has(e.id)) {
+          needsSave = true;
+          return { ...e, tags: sampleTagMap.get(e.id) };
+        }
+        return e;
+      });
+
+      if (needsSave) {
+        saveExpenses(enhanced);
+      }
+
+      return enhanced;
     }
     return SAMPLE_EXPENSES;
   } catch (err) {
