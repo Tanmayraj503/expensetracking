@@ -19,6 +19,11 @@ import {
   Layers,
   ChevronRight,
   Target,
+  LineChart as LineChartIcon,
+  Activity,
+  ArrowUpRight,
+  ArrowDownRight,
+  CalendarRange,
 } from 'lucide-react';
 import {
   PieChart as RechartsPieChart,
@@ -26,9 +31,15 @@ import {
   Cell,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Legend as RechartsLegend,
 } from 'recharts';
 import { Expense, BudgetSettings, MonthSummary } from '../types';
-import { formatCurrency, formatMonthYear } from '../utils/formatters';
+import { formatCurrency, formatMonthYear, formatDateLabel } from '../utils/formatters';
 
 interface FinancialInsight {
   overallHealth: {
@@ -130,6 +141,9 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
   // Donut chart state
   const [labelScope, setLabelScope] = useState<'month' | 'all'>('month');
   const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
+
+  // Multi-line 30-day comparison graph state
+  const [trendMetric, setTrendMetric] = useState<'daily' | 'cumulative' | 'rolling'>('daily');
 
   const currency = budgetSettings.currency;
 
@@ -262,6 +276,139 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
     );
   }, [labelBreakdown, currency]);
 
+  // --------------------------------------------------------------------------
+  // 30-Day Multi-Line Graph Calculations (Last 30 Days vs Previous 30 Days)
+  // --------------------------------------------------------------------------
+  const comparisonData = useMemo(() => {
+    // Determine anchor date: latest date among recorded expenses or fallback to '2026-10-29'
+    let anchorDateStr = '2026-10-29';
+    if (expenses.length > 0) {
+      const maxDate = expenses.reduce((max, e) => (e.date > max ? e.date : max), expenses[0].date);
+      if (maxDate > anchorDateStr) {
+        anchorDateStr = maxDate;
+      }
+    }
+
+    const [aY, aM, aD] = anchorDateStr.split('-').map(Number);
+    const anchorDate = new Date(aY, aM - 1, aD);
+
+    // Map daily spend and transaction counts for all expenses
+    const dailyMap = new Map<string, number>();
+    const countMap = new Map<string, number>();
+    expenses.forEach((e) => {
+      dailyMap.set(e.date, (dailyMap.get(e.date) || 0) + e.amount);
+      countMap.set(e.date, (countMap.get(e.date) || 0) + 1);
+    });
+
+    const formatYMD = (d: Date) => {
+      const yr = d.getFullYear();
+      const mo = String(d.getMonth() + 1).padStart(2, '0');
+      const da = String(d.getDate()).padStart(2, '0');
+      return `${yr}-${mo}-${da}`;
+    };
+
+    // Build 30 points (i = 29 down to 0)
+    // Current 30 days: (anchor - 29 days) to anchor
+    // Previous 30 days: (anchor - 59 days) to (anchor - 30 days)
+    const points: Array<{
+      dayIndex: number;
+      dayLabel: string;
+      shortDateCurrent: string;
+      shortDatePrevious: string;
+      currentDate: string;
+      previousDate: string;
+      currentSpend: number;
+      previousSpend: number;
+      currentCount: number;
+      previousCount: number;
+      currentCumulative: number;
+      previousCumulative: number;
+      currentRolling: number;
+      previousRolling: number;
+    }> = [];
+
+    let cumCurrent = 0;
+    let cumPrevious = 0;
+
+    for (let i = 29; i >= 0; i--) {
+      const dayNum = 30 - i; // Day 1 to Day 30
+
+      const cDate = new Date(anchorDate);
+      cDate.setDate(anchorDate.getDate() - i);
+      const cDateStr = formatYMD(cDate);
+
+      const pDate = new Date(anchorDate);
+      pDate.setDate(anchorDate.getDate() - i - 30);
+      const pDateStr = formatYMD(pDate);
+
+      const cSpend = dailyMap.get(cDateStr) || 0;
+      const pSpend = dailyMap.get(pDateStr) || 0;
+
+      cumCurrent += cSpend;
+      cumPrevious += pSpend;
+
+      points.push({
+        dayIndex: dayNum,
+        dayLabel: `Day ${dayNum}`,
+        shortDateCurrent: cDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        shortDatePrevious: pDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        currentDate: cDateStr,
+        previousDate: pDateStr,
+        currentSpend: Math.round(cSpend * 100) / 100,
+        previousSpend: Math.round(pSpend * 100) / 100,
+        currentCount: countMap.get(cDateStr) || 0,
+        previousCount: countMap.get(pDateStr) || 0,
+        currentCumulative: Math.round(cumCurrent * 100) / 100,
+        previousCumulative: Math.round(cumPrevious * 100) / 100,
+        currentRolling: 0,
+        previousRolling: 0,
+      });
+    }
+
+    // Calculate 7-day rolling averages
+    for (let i = 0; i < points.length; i++) {
+      const windowStart = Math.max(0, i - 6);
+      const windowSlice = points.slice(windowStart, i + 1);
+      const cRollingSum = windowSlice.reduce((s, p) => s + p.currentSpend, 0);
+      const pRollingSum = windowSlice.reduce((s, p) => s + p.previousSpend, 0);
+
+      points[i].currentRolling = Math.round((cRollingSum / windowSlice.length) * 100) / 100;
+      points[i].previousRolling = Math.round((pRollingSum / windowSlice.length) * 100) / 100;
+    }
+
+    const currentTotal = cumCurrent;
+    const previousTotal = cumPrevious;
+    const diff = currentTotal - previousTotal;
+    const pctDiff = previousTotal > 0 ? (diff / previousTotal) * 100 : 0;
+    const currentAvg = currentTotal / 30;
+    const previousAvg = previousTotal / 30;
+
+    const startDateCurrent = points[0]?.currentDate || '';
+    const endDateCurrent = points[points.length - 1]?.currentDate || '';
+    const startDatePrev = points[0]?.previousDate || '';
+    const endDatePrev = points[points.length - 1]?.previousDate || '';
+
+    // Peak spend days
+    const peakCurrentPoint = [...points].sort((a, b) => b.currentSpend - a.currentSpend)[0];
+    const peakPreviousPoint = [...points].sort((a, b) => b.previousSpend - a.previousSpend)[0];
+
+    return {
+      points,
+      currentTotal,
+      previousTotal,
+      diff,
+      pctDiff,
+      currentAvg,
+      previousAvg,
+      startDateCurrent,
+      endDateCurrent,
+      startDatePrev,
+      endDatePrev,
+      peakCurrentPoint,
+      peakPreviousPoint,
+    };
+  }, [expenses]);
+
   return (
     <div className="space-y-6">
       {/* Top Controls & Header */}
@@ -276,7 +423,7 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
             </h2>
           </div>
           <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-            Deep financial diagnostics, label allocation donut breakdown, and actionable savings strategies
+            Comparative 30-day velocity, label allocation donut breakdown, and actionable savings strategies
           </p>
         </div>
 
@@ -308,6 +455,376 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
             />
             <span>{isLoading ? 'Analyzing...' : 'Re-Analyze'}</span>
           </button>
+        </div>
+      </div>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* 30-DAY MULTI-LINE GRAPH: LAST 30 DAYS VS PREVIOUS 30-DAY PERIOD        */}
+      {/* ---------------------------------------------------------------------- */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 shadow-xs transition-colors space-y-5">
+        {/* Header & Metric Mode Selector */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
+                <LineChartIcon className="w-4 h-4" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                30-Day Expense Trajectory Comparison
+              </h3>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+              Multi-line comparison of daily spend over the last 30 days vs the preceding 30-day window
+            </p>
+          </div>
+
+          {/* Metric View Mode Toggle */}
+          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-lg border border-slate-200 dark:border-slate-800 self-start md:self-auto">
+            <button
+              type="button"
+              onClick={() => setTrendMetric('daily')}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                trendMetric === 'daily'
+                  ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Daily Total
+            </button>
+            <button
+              type="button"
+              onClick={() => setTrendMetric('rolling')}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                trendMetric === 'rolling'
+                  ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              7-Day Rolling Avg
+            </button>
+            <button
+              type="button"
+              onClick={() => setTrendMetric('cumulative')}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                trendMetric === 'cumulative'
+                  ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Cumulative Pace
+            </button>
+          </div>
+        </div>
+
+        {/* 4-Stat Comparison KPI Strip */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Card 1: Last 30 Days */}
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span className="flex items-center gap-1.5 font-medium">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                <span>Last 30 Days</span>
+              </span>
+              <span className="font-mono text-[11px] truncate max-w-[110px]">
+                {comparisonData.startDateCurrent.slice(5)} → {comparisonData.endDateCurrent.slice(5)}
+              </span>
+            </div>
+            <div className="text-xl font-bold font-mono tabular-nums text-slate-950 dark:text-white mt-1.5">
+              {formatCurrency(comparisonData.currentTotal, currency)}
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
+              Avg: {formatCurrency(comparisonData.currentAvg, currency)}/day
+            </div>
+          </div>
+
+          {/* Card 2: Previous 30 Days */}
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span className="flex items-center gap-1.5 font-medium">
+                <span className="w-2 h-2 rounded-full bg-indigo-500 shrink-0" />
+                <span>Previous 30 Days</span>
+              </span>
+              <span className="font-mono text-[11px] truncate max-w-[110px]">
+                {comparisonData.startDatePrev.slice(5)} → {comparisonData.endDatePrev.slice(5)}
+              </span>
+            </div>
+            <div className="text-xl font-bold font-mono tabular-nums text-slate-950 dark:text-white mt-1.5">
+              {formatCurrency(comparisonData.previousTotal, currency)}
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
+              Avg: {formatCurrency(comparisonData.previousAvg, currency)}/day
+            </div>
+          </div>
+
+          {/* Card 3: Period Variance */}
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span className="font-medium">Period Variance</span>
+              <Activity className="w-3.5 h-3.5 text-slate-400" />
+            </div>
+            <div
+              className={`text-xl font-bold font-mono tabular-nums mt-1.5 flex items-center gap-1 ${
+                comparisonData.diff <= 0
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-rose-600 dark:text-rose-400'
+              }`}
+            >
+              {comparisonData.diff <= 0 ? (
+                <TrendingDown className="w-4 h-4 shrink-0" />
+              ) : (
+                <TrendingUp className="w-4 h-4 shrink-0" />
+              )}
+              <span>
+                {comparisonData.diff > 0 ? '+' : ''}
+                {formatCurrency(comparisonData.diff, currency)}
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
+              {comparisonData.pctDiff >= 0 ? '+' : ''}
+              {comparisonData.pctDiff.toFixed(1)}% vs prior 30-day window
+            </div>
+          </div>
+
+          {/* Card 4: Peak Daily Spend */}
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span className="font-medium">Peak Spend Comparison</span>
+              <Target className="w-3.5 h-3.5 text-slate-400" />
+            </div>
+            <div className="text-xl font-bold font-mono tabular-nums text-slate-950 dark:text-white mt-1.5">
+              {formatCurrency(comparisonData.peakCurrentPoint?.currentSpend || 0, currency)}
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
+              Prior peak:{' '}
+              {formatCurrency(comparisonData.peakPreviousPoint?.previousSpend || 0, currency)}
+            </div>
+          </div>
+        </div>
+
+        {/* Recharts Multi-Line Graph */}
+        <div className="relative pt-2">
+          <div className="w-full h-72 sm:h-80 select-none">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={comparisonData.points}
+                margin={{ top: 12, right: 16, left: 0, bottom: 6 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke={theme === 'light' ? '#e2e8f0' : '#1e293b'}
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="dayLabel"
+                  stroke={theme === 'light' ? '#64748b' : '#94a3b8'}
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={{ stroke: theme === 'light' ? '#cbd5e1' : '#334155' }}
+                  interval={4} // every 5th day label (Day 1, 6, 11, 16, 21, 26, 30)
+                />
+                <YAxis
+                  stroke={theme === 'light' ? '#64748b' : '#94a3b8'}
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={{ stroke: theme === 'light' ? '#cbd5e1' : '#334155' }}
+                  tickFormatter={(val) =>
+                    val >= 1000
+                      ? `$${(val / 1000).toFixed(1)}k`
+                      : `$${val}`
+                  }
+                  width={60}
+                />
+                <RechartsTooltip
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      const point = payload[0]?.payload;
+                      if (!point) return null;
+
+                      const cVal =
+                        trendMetric === 'daily'
+                          ? point.currentSpend
+                          : trendMetric === 'cumulative'
+                          ? point.currentCumulative
+                          : point.currentRolling;
+
+                      const pVal =
+                        trendMetric === 'daily'
+                          ? point.previousSpend
+                          : trendMetric === 'cumulative'
+                          ? point.previousCumulative
+                          : point.previousRolling;
+
+                      const delta = cVal - pVal;
+
+                      return (
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3.5 rounded-xl shadow-xl text-xs font-mono space-y-2.5 min-w-[240px]">
+                          <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 dark:border-slate-800">
+                            <span className="font-bold text-slate-900 dark:text-white">
+                              {point.dayLabel} (Timeline Point {point.dayIndex}/30)
+                            </span>
+                            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-sans font-medium">
+                              {trendMetric === 'daily'
+                                ? 'Daily'
+                                : trendMetric === 'cumulative'
+                                ? 'Pace'
+                                : '7D Avg'}
+                            </span>
+                          </div>
+
+                          {/* Last 30 Days Point */}
+                          <div className="space-y-0.5">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                                <span className="text-slate-700 dark:text-slate-300 font-sans text-[11px] font-medium">
+                                  Last 30 Days:
+                                </span>
+                              </div>
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                                {formatCurrency(cVal, currency)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-slate-500 font-sans pl-4">
+                              <span>{point.currentDate}</span>
+                              {point.currentCount > 0 && (
+                                <span>{point.currentCount} {point.currentCount === 1 ? 'tx' : 'txs'}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Previous 30 Days Point */}
+                          <div className="space-y-0.5">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shrink-0" />
+                                <span className="text-slate-700 dark:text-slate-300 font-sans text-[11px] font-medium">
+                                  Previous 30 Days:
+                                </span>
+                              </div>
+                              <span className="font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">
+                                {formatCurrency(pVal, currency)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-slate-500 font-sans pl-4">
+                              <span>{point.previousDate}</span>
+                              {point.previousCount > 0 && (
+                                <span>{point.previousCount} {point.previousCount === 1 ? 'tx' : 'txs'}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Variance */}
+                          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+                            <span className="text-slate-500 font-sans">Comparison Delta:</span>
+                            <span
+                              className={`font-semibold tabular-nums ${
+                                delta > 0
+                                  ? 'text-rose-600 dark:text-rose-400'
+                                  : delta < 0
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-slate-500'
+                              }`}
+                            >
+                              {delta > 0 ? '+' : ''}
+                              {formatCurrency(delta, currency)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  }}
+                />
+                <RechartsLegend
+                  content={() => (
+                    <div className="flex flex-wrap items-center justify-center gap-6 pt-3 text-xs">
+                      {/* Legend 1: Last 30 Days */}
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-0.5 bg-emerald-500 inline-block rounded-full" />
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          Last 30 Days
+                        </span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                          ({formatDateLabel(comparisonData.startDateCurrent)} –{' '}
+                          {formatDateLabel(comparisonData.endDateCurrent)})
+                        </span>
+                      </div>
+
+                      {/* Legend 2: Previous 30 Days */}
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-4 h-0.5 bg-indigo-500 inline-block rounded-full"
+                          style={{ borderTop: '2px dashed #6366f1' }}
+                        />
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          Previous 30 Days
+                        </span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                          ({formatDateLabel(comparisonData.startDatePrev)} –{' '}
+                          {formatDateLabel(comparisonData.endDatePrev)})
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                />
+
+                {/* Line 1: Last 30 Days (Solid Emerald) */}
+                <Line
+                  type="monotone"
+                  dataKey={
+                    trendMetric === 'daily'
+                      ? 'currentSpend'
+                      : trendMetric === 'cumulative'
+                      ? 'currentCumulative'
+                      : 'currentRolling'
+                  }
+                  name="Last 30 Days"
+                  stroke="#10b981"
+                  strokeWidth={2.5}
+                  dot={{
+                    r: 3,
+                    fill: '#10b981',
+                    stroke: theme === 'light' ? '#ffffff' : '#0f172a',
+                    strokeWidth: 1.5,
+                  }}
+                  activeDot={{
+                    r: 6,
+                    fill: '#10b981',
+                    stroke: '#ffffff',
+                    strokeWidth: 2,
+                  }}
+                />
+
+                {/* Line 2: Previous 30 Days (Dashed Indigo) */}
+                <Line
+                  type="monotone"
+                  dataKey={
+                    trendMetric === 'daily'
+                      ? 'previousSpend'
+                      : trendMetric === 'cumulative'
+                      ? 'previousCumulative'
+                      : 'previousRolling'
+                  }
+                  name="Previous 30 Days"
+                  stroke="#6366f1"
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                  dot={{
+                    r: 2.5,
+                    fill: '#6366f1',
+                    stroke: theme === 'light' ? '#ffffff' : '#0f172a',
+                    strokeWidth: 1,
+                  }}
+                  activeDot={{
+                    r: 5,
+                    fill: '#6366f1',
+                    stroke: '#ffffff',
+                    strokeWidth: 2,
+                  }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
 
