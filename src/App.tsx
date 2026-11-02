@@ -43,6 +43,7 @@ export default function App() {
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
+  const [budgetModalInitialTab, setBudgetModalInitialTab] = useState<'budget' | 'goals'>('budget');
   const [addExpenseDefaultDate, setAddExpenseDefaultDate] = useState<string>('2026-10-29');
 
   // Notification Toast
@@ -371,6 +372,11 @@ export default function App() {
     }
   };
 
+  const handleOpenBudgetModal = (tab: 'budget' | 'goals' = 'budget') => {
+    setBudgetModalInitialTab(tab);
+    setIsBudgetModalOpen(true);
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex font-sans antialiased selection:bg-emerald-500/20 selection:text-emerald-700 dark:selection:text-emerald-300 transition-colors duration-200">
       {/* Collapsible Sidebar */}
@@ -382,7 +388,7 @@ export default function App() {
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         onOpenAddExpense={() => handleOpenAddExpense()}
-        onOpenBudgetModal={() => setIsBudgetModalOpen(true)}
+        onOpenBudgetModal={() => handleOpenBudgetModal('budget')}
         onExportCsv={handleExportCsvAction}
         onResetData={handleResetData}
         budgetSettings={budgetSettings}
@@ -398,7 +404,7 @@ export default function App() {
           currentTab={currentTab}
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
           onOpenAddExpense={() => handleOpenAddExpense()}
-          onOpenBudgetModal={() => setIsBudgetModalOpen(true)}
+          onOpenBudgetModal={() => handleOpenBudgetModal('budget')}
           currency={budgetSettings.currency}
           theme={theme}
           onToggleTheme={toggleTheme}
@@ -426,7 +432,8 @@ export default function App() {
               selectedYearMonth={selectedYearMonth}
               onSelectYearMonth={handleSelectYearMonth}
               budgetSettings={budgetSettings}
-              onOpenBudgetModal={() => setIsBudgetModalOpen(true)}
+              onOpenBudgetModal={handleOpenBudgetModal}
+              onUpdateBudgetSettings={updateBudgetSettings}
               theme={theme}
             />
           )}
@@ -460,7 +467,7 @@ export default function App() {
               budgetSettings={budgetSettings}
               selectedYearMonth={selectedYearMonth}
               onSelectYearMonth={handleSelectYearMonth}
-              onOpenBudgetModal={() => setIsBudgetModalOpen(true)}
+              onOpenBudgetModal={() => handleOpenBudgetModal('budget')}
               theme={theme}
             />
           )}
@@ -522,6 +529,7 @@ export default function App() {
         onClose={() => setIsBudgetModalOpen(false)}
         budgetSettings={budgetSettings}
         onSaveSettings={updateBudgetSettings}
+        initialTab={budgetModalInitialTab}
       />
 
       {/* Toast Notification Container */}

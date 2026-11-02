@@ -210,10 +210,15 @@ export function loadBudgetSettings(): BudgetSettings {
       return DEFAULT_BUDGET_SETTINGS;
     }
     const parsed = JSON.parse(raw);
-    return {
+    const loadedSettings: BudgetSettings = {
       ...DEFAULT_BUDGET_SETTINGS,
       ...parsed,
+      savingsGoals:
+        parsed.savingsGoals && Array.isArray(parsed.savingsGoals) && parsed.savingsGoals.length > 0
+          ? parsed.savingsGoals
+          : DEFAULT_BUDGET_SETTINGS.savingsGoals,
     };
+    return loadedSettings;
   } catch (err) {
     console.error('Failed to load budget settings, fallback to default', err);
     return DEFAULT_BUDGET_SETTINGS;

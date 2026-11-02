@@ -11,6 +11,11 @@ import {
   Calendar,
   Layers,
   ArrowUpRight,
+  Target,
+  PiggyBank,
+  Plus,
+  Check,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   PieChart as RechartsPieChart,
@@ -19,7 +24,7 @@ import {
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
 } from 'recharts';
-import { Expense, BudgetSettings, MonthSummary } from '../types';
+import { Expense, BudgetSettings, MonthSummary, SavingsGoal } from '../types';
 import {
   formatCurrency,
   formatMonthYear,
@@ -28,6 +33,7 @@ import {
   calculateMonthSummary,
   calculateCategoryBreakdown,
   getDaysInMonth,
+  CURRENCY_SYMBOLS,
 } from '../utils/formatters';
 import { CATEGORY_COLORS } from '../data/sampleExpenses';
 
@@ -36,7 +42,8 @@ interface MonthlyTrackerProps {
   selectedYearMonth: string;
   onSelectYearMonth: (ym: string) => void;
   budgetSettings: BudgetSettings;
-  onOpenBudgetModal: () => void;
+  onOpenBudgetModal: (initialTab?: 'budget' | 'goals') => void;
+  onUpdateBudgetSettings?: (newSettings: BudgetSettings) => void;
   theme?: 'dark' | 'light';
 }
 
@@ -46,6 +53,7 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
   onSelectYearMonth,
   budgetSettings,
   onOpenBudgetModal,
+  onUpdateBudgetSettings,
   theme = 'dark',
 }) => {
   const [hoveredDayPoint, setHoveredDayPoint] = useState<{
@@ -106,6 +114,31 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
       percentage: monthSummary.totalSpent > 0 ? (amount / monthSummary.totalSpent) * 100 : 0,
     }))
     .sort((a, b) => b.amount - a.amount);
+
+  // Savings Goals calculations
+  const savingsGoals = budgetSettings.savingsGoals || [];
+  const totalSaved = savingsGoals.reduce((sum, g) => sum + g.currentAmount, 0);
+  const totalTarget = savingsGoals.reduce((sum, g) => sum + g.targetAmount, 0);
+  const overallPercentage = totalTarget > 0 ? (totalSaved / totalTarget) * 100 : 0;
+  const totalRemaining = Math.max(0, totalTarget - totalSaved);
+  const completedGoalsCount = savingsGoals.filter((g) => g.currentAmount >= g.targetAmount).length;
+
+  const handleQuickAddGoalSavings = (goalId: string, amount: number) => {
+    if (!onUpdateBudgetSettings) {
+      onOpenBudgetModal('goals');
+      return;
+    }
+    const updatedGoals = savingsGoals.map((g) => {
+      if (g.id === goalId) {
+        return { ...g, currentAmount: Math.max(0, g.currentAmount + amount) };
+      }
+      return g;
+    });
+    onUpdateBudgetSettings({
+      ...budgetSettings,
+      savingsGoals: updatedGoals,
+    });
+  };
 
   // Build Cumulative Pacing Curves
   const daysInMonth = monthSummary.daysInMonth;
@@ -255,7 +288,7 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
 
           <button
             type="button"
-            onClick={onOpenBudgetModal}
+            onClick={() => onOpenBudgetModal('budget')}
             className="px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors whitespace-nowrap"
           >
             Adjust Budget Cap
@@ -621,6 +654,256 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
         </div>
       </div>
 
+      {/* Long-Term Savings Goals & Progress Section */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 text-emerald-600 dark:text-emerald-400">
+              <Target className="w-5 h-5 stroke-[2]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Long-Term Savings Goals & Progress
+                </h3>
+                <span className="px-2 py-0.5 text-[10px] font-mono font-semibold rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300">
+                  {savingsGoals.length} {savingsGoals.length === 1 ? 'Goal' : 'Goals'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Track long-term capital milestones, category links, and dedicated reserve targets
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenBudgetModal('goals')}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Define New Goal</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenBudgetModal('goals')}
+              className="px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 rounded-lg transition-colors whitespace-nowrap"
+            >
+              Manage in Budget
+            </button>
+          </div>
+        </div>
+
+        {/* Aggregated Goals Metric Strip */}
+        <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800/80 rounded-xl space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-medium">
+                Total Saved
+              </span>
+              <span className="text-base sm:text-lg font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+                {formatCurrency(totalSaved, currency)}
+              </span>
+            </div>
+            <div>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-medium">
+                Aggregated Target
+              </span>
+              <span className="text-base sm:text-lg font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                {formatCurrency(totalTarget, currency)}
+              </span>
+            </div>
+            <div>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-medium">
+                Remaining to Fund
+              </span>
+              <span className="text-base sm:text-lg font-bold font-mono tabular-nums text-slate-700 dark:text-slate-300">
+                {formatCurrency(totalRemaining, currency)}
+              </span>
+            </div>
+            <div>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-medium">
+                Goals Completed
+              </span>
+              <span className="text-base sm:text-lg font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                {completedGoalsCount} <span className="text-xs text-slate-500 font-normal">of {savingsGoals.length}</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Aggregated Progress Bar */}
+          <div>
+            <div className="flex justify-between items-center text-xs mb-1 font-mono tabular-nums">
+              <span className="text-slate-500 dark:text-slate-400 text-[11px]">
+                Portfolio Funding Progress
+              </span>
+              <span className="font-bold text-emerald-600 dark:text-emerald-400 text-xs">
+                {overallPercentage.toFixed(1)}% funded
+              </span>
+            </div>
+            <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
+              <div
+                className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, overallPercentage)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Goals Grid Cards */}
+        {savingsGoals.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-5">
+            {savingsGoals.map((goal) => {
+              const pct = goal.targetAmount > 0 ? (goal.currentAmount / goal.targetAmount) * 100 : 0;
+              const isAchieved = goal.currentAmount >= goal.targetAmount;
+              const remaining = Math.max(0, goal.targetAmount - goal.currentAmount);
+              const catColors = CATEGORY_COLORS[goal.category];
+
+              // Calculate this month's spending in this category to show connection
+              const monthSpendInCat = monthExpenses
+                .filter((e) => e.category === goal.category)
+                .reduce((s, e) => s + e.amount, 0);
+              const catCap = budgetSettings.categoryBudgets[goal.category];
+
+              return (
+                <div
+                  key={goal.id}
+                  className="bg-slate-50/70 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/90 rounded-xl p-4 flex flex-col justify-between space-y-3.5 hover:border-slate-300 dark:hover:border-slate-700 transition-colors shadow-2xs"
+                >
+                  {/* Top Bar of Card */}
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-xs sm:text-sm text-slate-950 dark:text-white truncate">
+                          {goal.name}
+                        </h4>
+                        {goal.notes && (
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                            {goal.notes}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Category Badge */}
+                      <span
+                        className={`text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 ${catColors?.bg || 'bg-slate-100'} ${catColors?.text || 'text-slate-700'} ${catColors?.border || 'border-slate-300'}`}
+                      >
+                        {goal.category}
+                      </span>
+                    </div>
+
+                    {/* Target Date Pill */}
+                    {goal.targetDate && (
+                      <div className="flex items-center gap-1.5 mt-2 text-[11px] text-slate-500 font-mono">
+                        <Calendar className="w-3 h-3 text-slate-400" />
+                        <span>Target: {goal.targetDate}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Amounts & Visual Progress Bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-baseline justify-between font-mono tabular-nums text-xs">
+                      <div>
+                        <span className="text-base sm:text-lg font-bold text-slate-950 dark:text-white">
+                          {formatCurrency(goal.currentAmount, currency)}
+                        </span>
+                        <span className="text-slate-500 text-[11px] ml-1">
+                          / {formatCurrency(goal.targetAmount, currency)}
+                        </span>
+                      </div>
+
+                      <span
+                        className={`text-xs font-bold ${
+                          isAchieved
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {pct.toFixed(1)}%
+                      </span>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, pct)}%`,
+                          backgroundColor: catColors?.bar || '#10b981',
+                        }}
+                      />
+                    </div>
+
+                    {/* Remaining or Achieved Status */}
+                    <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-slate-500 pt-0.5">
+                      {isAchieved ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                          <Check className="w-3 h-3 stroke-[2.5]" />
+                          Goal Target Reached!
+                        </span>
+                      ) : (
+                        <span>{formatCurrency(remaining, currency)} remaining</span>
+                      )}
+                      <span>
+                        {catCap
+                          ? `Mo. Cap: ${formatCurrency(catCap, currency)}`
+                          : 'No category cap'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Category Context & Quick Deposit */}
+                  <div className="pt-2.5 border-t border-slate-200/80 dark:border-slate-800/80 flex items-center justify-between gap-2 text-xs">
+                    <div className="text-[10px] text-slate-500 truncate min-w-0">
+                      Spent this mo: <span className="font-mono font-medium text-slate-700 dark:text-slate-300">{formatCurrency(monthSpendInCat, currency)}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAddGoalSavings(goal.id, 50)}
+                        title={`Quick add +${CURRENCY_SYMBOLS[currency] || '$'}50 to ${goal.name}`}
+                        className="px-2 py-0.5 text-[10px] font-mono font-semibold rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                      >
+                        +{CURRENCY_SYMBOLS[currency] || '$'}50
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAddGoalSavings(goal.id, 100)}
+                        title={`Quick add +${CURRENCY_SYMBOLS[currency] || '$'}100 to ${goal.name}`}
+                        className="px-2 py-0.5 text-[10px] font-mono font-semibold rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                      >
+                        +{CURRENCY_SYMBOLS[currency] || '$'}100
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="p-8 mt-4 text-center bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+            <PiggyBank className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+            <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+              No long-term savings goals active
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1 max-w-sm mx-auto">
+              Define target amounts and link them to categories like Travel, Housing, or Shopping to track progress.
+            </p>
+            <button
+              type="button"
+              onClick={() => onOpenBudgetModal('goals')}
+              className="mt-3 px-3.5 py-1.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors inline-flex items-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Create First Savings Goal</span>
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Two Column Section: Category Distribution & Top Merchants */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Category Spending Breakdown */}
@@ -636,7 +919,7 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
             </div>
             <button
               type="button"
-              onClick={onOpenBudgetModal}
+              onClick={() => onOpenBudgetModal('budget')}
               className="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 font-semibold"
             >
               Set Category Caps

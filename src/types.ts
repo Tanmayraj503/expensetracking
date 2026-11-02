@@ -70,12 +70,24 @@ export interface FrequentExpensePreset {
   iconName?: 'Coffee' | 'Utensils' | 'Bus' | 'ShoppingBag' | 'CupSoda' | 'Car' | 'Zap' | 'Tag';
 }
 
+export interface SavingsGoal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  category: ExpenseCategory;
+  targetDate?: string; // YYYY-MM-DD
+  notes?: string;
+  createdAt?: string;
+}
+
 export interface BudgetSettings {
   monthlyBudget: number;
   dailyTarget: number;
   autoDailyTarget: boolean;
   currency: string;
   categoryBudgets: Partial<Record<ExpenseCategory, number>>;
+  savingsGoals?: SavingsGoal[];
 }
 
 export interface DaySummary {

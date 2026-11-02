@@ -52,6 +52,38 @@ export const DEFAULT_BUDGET_SETTINGS: BudgetSettings = {
     'Health & Fitness': 120,
     'Subscriptions': 80,
   },
+  savingsGoals: [
+    {
+      id: 'goal-emergency-fund',
+      name: 'Emergency Buffer Fund',
+      targetAmount: 6000,
+      currentAmount: 3450,
+      category: 'Housing',
+      targetDate: '2027-06-30',
+      notes: '6-month emergency reserve cushion',
+      createdAt: '2026-01-15',
+    },
+    {
+      id: 'goal-vacation-travel',
+      name: 'Summer Europe Trip',
+      targetAmount: 2800,
+      currentAmount: 1950,
+      category: 'Travel',
+      targetDate: '2027-07-15',
+      notes: 'Flights, coastal lodging, and itinerary excursions',
+      createdAt: '2026-03-10',
+    },
+    {
+      id: 'goal-tech-setup',
+      name: 'Workspace Ergonomics Upgrade',
+      targetAmount: 1400,
+      currentAmount: 650,
+      category: 'Shopping',
+      targetDate: '2026-12-31',
+      notes: 'Motorized standing desk and color-accurate 4K monitor',
+      createdAt: '2026-05-20',
+    },
+  ],
 };
 
 export const SAMPLE_EXPENSES: Expense[] = [
