@@ -124,3 +124,39 @@ export interface MonthSummary {
   previousMonthSpend: number;
   changePercentVsPrevMonth: number | null;
 }
+
+export interface CategoryProjection {
+  category: ExpenseCategory;
+  currentSpent: number;
+  projectedTotal: number;
+  budgetLimit?: number;
+  isOverLimit: boolean;
+  varianceVsLimit: number;
+}
+
+export interface EndOfMonthProjection {
+  yearMonth: string;
+  currentSpend: number;
+  predictedTotal: number;
+  budget: number;
+  daysElapsed: number;
+  daysRemaining: number;
+  daysInMonth: number;
+  historicalDailyAverage: number;
+  recent7DayRunRate: number;
+  weekdayRunRate: number;
+  weekendRunRate: number;
+  remainingProjectedSpend: number;
+  varianceVsBudget: number; // positive = over budget, negative = cushion
+  variancePercent: number;
+  status: 'on-track' | 'near-limit' | 'exceeding-limit';
+  confidenceBand: {
+    conservative: number;
+    projected: number;
+    high: number;
+  };
+  dailyAllowableToStayOnBudget: number;
+  categoryProjections: CategoryProjection[];
+  insightMessage: string;
+}
+

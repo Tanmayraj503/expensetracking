@@ -16,6 +16,9 @@ import {
   Plus,
   Check,
   ShieldCheck,
+  Sparkles,
+  Zap,
+  Activity,
 } from 'lucide-react';
 import {
   PieChart as RechartsPieChart,
@@ -24,7 +27,7 @@ import {
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
 } from 'recharts';
-import { Expense, BudgetSettings, MonthSummary, SavingsGoal } from '../types';
+import { Expense, BudgetSettings, MonthSummary, SavingsGoal, EndOfMonthProjection } from '../types';
 import {
   formatCurrency,
   formatMonthYear,
@@ -34,6 +37,7 @@ import {
   calculateCategoryBreakdown,
   getDaysInMonth,
   CURRENCY_SYMBOLS,
+  predictEndOfMonthSpend,
 } from '../utils/formatters';
 import { CATEGORY_COLORS } from '../data/sampleExpenses';
 
@@ -66,6 +70,7 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
 
   const currency = budgetSettings.currency;
   const monthSummary = calculateMonthSummary(expenses, selectedYearMonth, budgetSettings);
+  const eomProjection = predictEndOfMonthSpend(expenses, selectedYearMonth, budgetSettings);
 
   const prevYearMonth = getPreviousYearMonth(selectedYearMonth);
   const nextYearMonth = getNextYearMonth(selectedYearMonth);
@@ -384,30 +389,33 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col justify-between shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
             <span className="font-semibold text-slate-700 dark:text-slate-300">Projected Month Total</span>
-            <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">Run-Rate</span>
+            <span className="font-mono tabular-nums text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1 text-[11px]">
+              <Sparkles className="w-3 h-3" />
+              <span>Run-Rate Model</span>
+            </span>
           </div>
 
           <div className="my-3">
             <div className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-slate-950 dark:text-white">
-              {formatCurrency(monthSummary.projectedTotal, currency)}
+              {formatCurrency(eomProjection.predictedTotal, currency)}
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              At current {formatCurrency(monthSummary.dailyAverage, currency)}/day pace
+              Historical pace: {formatCurrency(eomProjection.historicalDailyAverage, currency)}/day
             </div>
           </div>
 
           <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 text-xs font-mono tabular-nums">
-            {monthSummary.projectedTotal <= monthSummary.budget ? (
+            {eomProjection.predictedTotal <= eomProjection.budget ? (
               <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 Under budget by{' '}
-                {formatCurrency(monthSummary.budget - monthSummary.projectedTotal, currency)}
+                {formatCurrency(eomProjection.budget - eomProjection.predictedTotal, currency)}
               </span>
             ) : (
-              <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1 font-medium">
+              <span className="text-rose-600 dark:text-rose-400 flex items-center gap-1 font-medium">
                 <AlertTriangle className="w-3.5 h-3.5" />
                 Projected to exceed by{' '}
-                {formatCurrency(monthSummary.projectedTotal - monthSummary.budget, currency)}
+                {formatCurrency(eomProjection.predictedTotal - eomProjection.budget, currency)}
               </span>
             )}
           </div>
@@ -463,6 +471,226 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
             Prev month total: {formatCurrency(monthSummary.previousMonthSpend, currency)}
           </div>
         </div>
+      </div>
+
+      {/* End-of-Month Predictive Run-Rate Forecast Intelligence Card */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 shadow-xs space-y-5">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 text-emerald-600 dark:text-emerald-400">
+              <Sparkles className="w-5 h-5 stroke-[2]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  End-of-Month Predictive Run-Rate Forecast
+                </h3>
+                <span
+                  className={`px-2 py-0.5 text-[10px] font-mono font-semibold rounded-full border ${
+                    eomProjection.status === 'on-track'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800'
+                      : eomProjection.status === 'near-limit'
+                      ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800'
+                      : 'bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-400 border-rose-300 dark:border-rose-800'
+                  }`}
+                >
+                  {eomProjection.status === 'on-track'
+                    ? '● ON TRACK'
+                    : eomProjection.status === 'near-limit'
+                    ? '▲ NEAR BUDGET LIMIT'
+                    : '✕ PROJECTED OVERRUN'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Statistical projection based on historical daily average run-rate, weekend/weekday velocity, and remaining runway
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <span className="text-slate-500">Runway:</span>
+            <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-semibold tabular-nums">
+              {eomProjection.daysRemaining} days remaining ({eomProjection.daysElapsed} elapsed)
+            </span>
+          </div>
+        </div>
+
+        {/* 4 Run-Rate Metrics Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Card 1: Predicted Total */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 block mb-1">
+              Predicted Month-End Spend
+            </span>
+            <div className="text-2xl font-bold font-mono tabular-nums text-slate-950 dark:text-white">
+              {formatCurrency(eomProjection.predictedTotal, currency)}
+            </div>
+            <div className="text-[11px] mt-1 font-mono tabular-nums">
+              {eomProjection.varianceVsBudget <= 0 ? (
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                  -{formatCurrency(Math.abs(eomProjection.varianceVsBudget), currency)} under budget cap
+                </span>
+              ) : (
+                <span className="text-rose-600 dark:text-rose-400 font-medium">
+                  +{formatCurrency(eomProjection.varianceVsBudget, currency)} (+{eomProjection.variancePercent.toFixed(1)}%) over cap
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Card 2: Historical Run-Rate */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 block mb-1">
+              Historical Daily Average Pace
+            </span>
+            <div className="text-2xl font-bold font-mono tabular-nums text-slate-950 dark:text-white">
+              {formatCurrency(eomProjection.historicalDailyAverage, currency)}
+              <span className="text-xs text-slate-500 font-normal">/day</span>
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-mono tabular-nums">
+              7-Day Velocity: {formatCurrency(eomProjection.recent7DayRunRate, currency)}/day
+            </div>
+          </div>
+
+          {/* Card 3: Weekday vs Weekend Pace */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 block mb-1">
+              Weekday vs Weekend Run-Rate
+            </span>
+            <div className="flex items-baseline justify-between text-xs font-mono font-bold text-slate-950 dark:text-white pt-1.5">
+              <span>Wkday: {formatCurrency(eomProjection.weekdayRunRate, currency)}</span>
+              <span className="text-indigo-600 dark:text-indigo-400">Wkend: {formatCurrency(eomProjection.weekendRunRate, currency)}</span>
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-mono">
+              Model adjusts remaining calendar days
+            </div>
+          </div>
+
+          {/* Card 4: Allowable Daily Ceiling */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 block mb-1">
+              Allowable Daily Run-Rate
+            </span>
+            <div className="text-2xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+              {formatCurrency(eomProjection.dailyAllowableToStayOnBudget, currency)}
+              <span className="text-xs text-slate-500 font-normal">/day</span>
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-mono">
+              Maximum allowable to finish within limit
+            </div>
+          </div>
+        </div>
+
+        {/* Trajectory Range & Confidence Corridor */}
+        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-200/80 dark:border-slate-800/80 space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-1 font-mono tabular-nums">
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              Spend Trajectory & Confidence Corridor
+            </span>
+            <div className="flex items-center gap-3 text-[11px] text-slate-500">
+              <span>Low: <strong className="text-slate-700 dark:text-slate-300">{formatCurrency(eomProjection.confidenceBand.conservative, currency)}</strong></span>
+              <span>Expected: <strong className="text-emerald-600 dark:text-emerald-400">{formatCurrency(eomProjection.confidenceBand.projected, currency)}</strong></span>
+              <span>High: <strong className="text-slate-700 dark:text-slate-300">{formatCurrency(eomProjection.confidenceBand.high, currency)}</strong></span>
+            </div>
+          </div>
+
+          {/* Visual Range Indicator Bar */}
+          <div className="relative w-full h-4 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+            {/* Current Spend */}
+            <div
+              className="absolute left-0 top-0 bottom-0 bg-emerald-500 rounded-l-full"
+              style={{
+                width: `${Math.min(100, (eomProjection.currentSpend / Math.max(eomProjection.budget, eomProjection.confidenceBand.high, 1)) * 100)}%`,
+              }}
+            />
+            {/* Projected Remaining Span */}
+            <div
+              className="absolute top-0 bottom-0 bg-emerald-400/40 dark:bg-emerald-500/30"
+              style={{
+                left: `${Math.min(100, (eomProjection.currentSpend / Math.max(eomProjection.budget, eomProjection.confidenceBand.high, 1)) * 100)}%`,
+                width: `${Math.min(
+                  100 - (eomProjection.currentSpend / Math.max(eomProjection.budget, eomProjection.confidenceBand.high, 1)) * 100,
+                  (eomProjection.remainingProjectedSpend / Math.max(eomProjection.budget, eomProjection.confidenceBand.high, 1)) * 100
+                )}%`,
+              }}
+            />
+          </div>
+
+          <div className="flex justify-between items-center text-[10px] font-mono tabular-nums text-slate-500">
+            <span>Spent to Date: {formatCurrency(eomProjection.currentSpend, currency)}</span>
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              Budget Cap: {formatCurrency(eomProjection.budget, currency)}
+            </span>
+          </div>
+        </div>
+
+        {/* Executive Actionable Insight Message */}
+        <div
+          className={`p-3.5 rounded-xl border flex items-start gap-3 text-xs leading-relaxed ${
+            eomProjection.status === 'on-track'
+              ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-200'
+              : eomProjection.status === 'near-limit'
+              ? 'bg-amber-50/70 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/80 text-amber-900 dark:text-amber-200'
+              : 'bg-rose-50/70 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800/80 text-rose-900 dark:text-rose-200'
+          }`}
+        >
+          <Activity className="w-4 h-4 shrink-0 mt-0.5 text-current opacity-80" />
+          <div className="flex-1">
+            <span className="font-bold mr-1">Run-Rate Forecast:</span>
+            <span>{eomProjection.insightMessage}</span>
+          </div>
+        </div>
+
+        {/* Category Projections Strip */}
+        {eomProjection.categoryProjections.length > 0 && (
+          <div className="pt-1">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Top Category Projected Trajectories
+              </span>
+              <span className="text-[11px] text-slate-500 font-mono">
+                Projected vs Monthly Caps
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs">
+              {eomProjection.categoryProjections.slice(0, 4).map((cp) => (
+                <div
+                  key={cp.category}
+                  className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                      {cp.category}
+                    </span>
+                    {cp.budgetLimit ? (
+                      <span
+                        className={`text-[10px] font-mono font-bold ${
+                          cp.isOverLimit ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+                        }`}
+                      >
+                        {cp.isOverLimit ? `+${formatCurrency(cp.varianceVsLimit, currency)}` : 'Under'}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-baseline justify-between mt-1 font-mono text-[11px] tabular-nums">
+                    <span className="text-slate-900 dark:text-white font-bold">
+                      {formatCurrency(cp.projectedTotal, currency)}
+                    </span>
+                    {cp.budgetLimit ? (
+                      <span className="text-slate-500 text-[10px]">
+                        Cap: {formatCurrency(cp.budgetLimit, currency)}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 text-[10px]">No cap</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Cumulative Budget Pacing Curve Chart */}
