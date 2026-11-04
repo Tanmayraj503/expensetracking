@@ -17,6 +17,7 @@ import {
   Building2,
   RotateCcw,
   Check,
+  FileText,
 } from 'lucide-react';
 import { Expense, ExpenseCategory, BudgetSettings } from '../types';
 import { CATEGORIES, CATEGORY_COLORS, PAYMENT_METHODS } from '../data/sampleExpenses';
@@ -26,6 +27,23 @@ import {
   formatFullDate,
   formatMonthYear,
 } from '../utils/formatters';
+
+function highlightMatch(text: string, query: string) {
+  if (!query || !query.trim() || !text) return text;
+  const q = query.trim().toLowerCase();
+  const lowerText = text.toLowerCase();
+  const index = lowerText.indexOf(q);
+  if (index === -1) return text;
+  return (
+    <>
+      {text.slice(0, index)}
+      <mark className="bg-emerald-200/90 dark:bg-emerald-950 text-emerald-950 dark:text-emerald-200 font-semibold px-0.5 rounded-xs">
+        {text.slice(index, index + q.length)}
+      </mark>
+      {text.slice(index + q.length)}
+    </>
+  );
+}
 
 interface ExpenseListProps {
   expenses: Expense[];
@@ -46,6 +64,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
 }) => {
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchTarget, setSearchTarget] = useState<'all' | 'merchant' | 'notes'>('all');
   const [selectedMerchant, setSelectedMerchant] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('all');
@@ -154,14 +173,22 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
           return false;
         }
 
-        // Search query (matches merchant, notes, category, or tags)
+        // Search query: filters transactions by merchant name or notes
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
           const matchMerchant = e.merchant.toLowerCase().includes(q);
           const matchNotes = (e.notes || '').toLowerCase().includes(q);
-          const matchCategory = e.category.toLowerCase().includes(q);
-          const matchTags = e.tags?.some((t) => t.toLowerCase().includes(q));
-          if (!matchMerchant && !matchNotes && !matchCategory && !matchTags) return false;
+
+          if (searchTarget === 'merchant') {
+            if (!matchMerchant) return false;
+          } else if (searchTarget === 'notes') {
+            if (!matchNotes) return false;
+          } else {
+            // 'all': matches either merchant name or notes (or category/tags if broader)
+            const matchCategory = e.category.toLowerCase().includes(q);
+            const matchTags = e.tags?.some((t) => t.toLowerCase().includes(q));
+            if (!matchMerchant && !matchNotes && !matchCategory && !matchTags) return false;
+          }
         }
 
         // Category filter
@@ -218,6 +245,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
   }, [
     expenses,
     searchQuery,
+    searchTarget,
     selectedMerchant,
     selectedCategory,
     startDate,
@@ -273,6 +301,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
 
   const clearFilters = () => {
     setSearchQuery('');
+    setSearchTarget('all');
     setSelectedMerchant('all');
     setSelectedCategory('all');
     setDatePreset('all');
@@ -332,33 +361,107 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
           </div>
         </div>
 
-        {/* Primary Search & Filter Bar */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 pt-3 border-t border-slate-200 dark:border-slate-800/80">
-          {/* Merchant / General Search Input */}
-          <div className="sm:col-span-2 lg:col-span-4 relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              aria-label="Search by merchant name, category, or notes"
-              placeholder="Search merchant name (e.g. Starbucks, Target)..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white rounded-lg pl-9 pr-8 py-2 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-hidden focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-            />
-            {searchQuery && (
+        {/* Dedicated Search Bar Row */}
+        <div className="pt-3 border-t border-slate-200 dark:border-slate-800/80 space-y-2.5">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                aria-label="Search transactions by merchant name or notes"
+                placeholder={
+                  searchTarget === 'merchant'
+                    ? 'Search merchant names (e.g. Starbucks, Target)...'
+                    : searchTarget === 'notes'
+                    ? 'Search notes (e.g. coffee, lunch, client)...'
+                    : 'Search by merchant name or notes...'
+                }
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white rounded-lg pl-9 pr-8 py-2.5 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-hidden focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded"
+                  title="Clear search"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Scope Selector: All vs Merchant vs Notes */}
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950/70 p-1 rounded-lg border border-slate-200 dark:border-slate-800 shrink-0 text-xs self-start sm:self-auto">
+              <span className="text-[11px] text-slate-500 font-medium px-1.5 hidden md:inline">
+                Scope:
+              </span>
+              <button
+                type="button"
+                onClick={() => setSearchTarget('all')}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  searchTarget === 'all'
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Merchant or Notes
+              </button>
+              <button
+                type="button"
+                onClick={() => setSearchTarget('merchant')}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1 ${
+                  searchTarget === 'merchant'
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                <Building2 className="w-3 h-3" />
+                <span>Merchant Only</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSearchTarget('notes')}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1 ${
+                  searchTarget === 'notes'
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                <FileText className="w-3 h-3" />
+                <span>Notes Only</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Active Search Result Live Feedback */}
+          {searchQuery.trim() !== '' && (
+            <div className="flex items-center justify-between text-xs px-1 text-slate-600 dark:text-slate-400">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>
+                  Filtering by {searchTarget === 'merchant' ? 'merchant' : searchTarget === 'notes' ? 'notes' : 'merchant or notes'}:{' '}
+                  <strong className="text-slate-900 dark:text-white">"{searchQuery}"</strong>{' '}
+                  ({filteredExpenses.length} {filteredExpenses.length === 1 ? 'match' : 'matches'})
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded"
-                title="Clear search"
+                className="text-xs text-rose-600 dark:text-rose-400 hover:underline font-medium"
               >
-                <X className="w-3.5 h-3.5" />
+                Clear Search
               </button>
-            )}
-          </div>
+            </div>
+          )}
+        </div>
 
+        {/* Secondary Filter Dropdowns (Category, Date Range, Sort) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 pt-1">
           {/* Category Dropdown */}
-          <div className="lg:col-span-3">
+          <div className="sm:col-span-1 lg:col-span-5">
             <select
               aria-label="Filter by Category"
               value={selectedCategory}
@@ -375,7 +478,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
           </div>
 
           {/* Date Range Selector Dropdown */}
-          <div className="lg:col-span-3">
+          <div className="sm:col-span-1 lg:col-span-4">
             <div className="relative">
               <select
                 aria-label="Filter by Date Range"
@@ -402,7 +505,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
           </div>
 
           {/* Sort By Dropdown */}
-          <div className="sm:col-span-1 lg:col-span-2">
+          <div className="sm:col-span-2 lg:col-span-3">
             <select
               aria-label="Sort Transactions"
               value={sortBy}
@@ -711,11 +814,12 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
             {/* Search Query Badge */}
             {searchQuery.trim() !== '' && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-medium">
-                Search: "{searchQuery}"
+                Search: "{searchQuery}" ({searchTarget === 'merchant' ? 'Merchant' : searchTarget === 'notes' ? 'Notes' : 'Merchant & Notes'})
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
                   className="hover:text-rose-500"
+                  title="Clear search query"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -858,7 +962,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
                           <div className="min-w-0 space-y-0.5">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-semibold text-slate-900 dark:text-white text-sm truncate">
-                                {expense.merchant}
+                                {highlightMatch(expense.merchant, searchQuery)}
                               </span>
                               {expense.isRecurring && (
                                 <span className="inline-flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-200 dark:border-slate-700 font-mono capitalize">
@@ -908,9 +1012,10 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
                             )}
 
                             {expense.notes && (
-                              <p className="text-[11px] text-slate-500 italic truncate">
-                                "{expense.notes}"
-                              </p>
+                              <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 italic">
+                                <FileText className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span className="truncate">"{highlightMatch(expense.notes, searchQuery)}"</span>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -967,7 +1072,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
                     <div className="min-w-0 space-y-0.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold text-slate-900 dark:text-white text-sm truncate">
-                          {expense.merchant}
+                          {highlightMatch(expense.merchant, searchQuery)}
                         </span>
                         <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400 text-xs">
                           {formatDateLabel(expense.date)}
@@ -1011,6 +1116,14 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
                           ))}
                         </div>
                       )}
+
+                      {/* Notes in flat view */}
+                      {expense.notes && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 italic pt-0.5">
+                          <FileText className="w-3 h-3 text-slate-400 shrink-0" />
+                          <span className="truncate">"{highlightMatch(expense.notes, searchQuery)}"</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1050,12 +1163,29 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
             <Search className="w-6 h-6" />
           </div>
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300">
-            No expenses found
+            {searchQuery.trim() ? 'No matching transactions' : 'No expenses found'}
           </h3>
           <p className="text-xs text-slate-600 dark:text-slate-500 max-w-sm mx-auto mt-1">
-            No transactions matched your current search filters, merchant name, category, or date range.
+            {searchQuery.trim()
+              ? `No transactions matched "${searchQuery}" in ${
+                  searchTarget === 'merchant'
+                    ? 'merchant names'
+                    : searchTarget === 'notes'
+                    ? 'notes'
+                    : 'merchant names or notes'
+                }. Try checking for typos or searching a different term.`
+              : 'No transactions matched your current filters, category, or date range.'}
           </p>
-          <div className="mt-4 flex items-center justify-center gap-3">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+            {searchQuery.trim() && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 rounded-lg transition-colors"
+              >
+                Clear Search Query
+              </button>
+            )}
             {hasActiveFilters && (
               <button
                 type="button"
