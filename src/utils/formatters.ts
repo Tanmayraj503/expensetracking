@@ -7,6 +7,7 @@ import {
   ExpenseCategory,
   EndOfMonthProjection,
   CategoryProjection,
+  SavingsGoal,
 } from '../types';
 import { CATEGORIES } from '../data/sampleExpenses';
 
@@ -401,5 +402,68 @@ export function predictEndOfMonthSpend(
     dailyAllowableToStayOnBudget: Math.round(dailyAllowableToStayOnBudget * 100) / 100,
     categoryProjections,
     insightMessage,
+  };
+}
+
+/**
+ * Normalizes a tag for flexible comparison (lowercased, alphanumeric without #, -, _, spaces)
+ */
+export function normalizeTag(tag: string): string {
+  if (!tag) return '';
+  return tag.trim().replace(/^#/, '').toLowerCase().replace(/[-_\s]+/g, '');
+}
+
+/**
+ * Checks whether an expense's tags match a target goal's tag or goal name.
+ */
+export function matchExpenseToGoalTag(expense: Expense, goalTagOrName: string): boolean {
+  if (!expense.tags || expense.tags.length === 0 || !goalTagOrName) return false;
+  const targetNorm = normalizeTag(goalTagOrName);
+  if (!targetNorm) return false;
+
+  return expense.tags.some((t) => {
+    const norm = normalizeTag(t);
+    return norm === targetNorm || norm.includes(targetNorm) || targetNorm.includes(norm);
+  });
+}
+
+/**
+ * Calculates total savings for a goal identified through matching transaction tags,
+ * plus any manual base/deposit amount.
+ */
+export function calculateGoalSavings(
+  goal: SavingsGoal,
+  expenses: Expense[] = []
+): {
+  baseAmount: number;
+  taggedAmount: number;
+  totalSaved: number;
+  totalAmount: number;
+  matchingCount: number;
+  percentage: number;
+  remainingAmount: number;
+  isCompleted: boolean;
+  matchingExpenses: Expense[];
+} {
+  const targetTag = goal.tag || goal.name;
+  const matchingExpenses = expenses.filter((e) => matchExpenseToGoalTag(e, targetTag));
+  const taggedAmount = matchingExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const baseAmount = Math.max(0, goal.currentAmount || 0);
+  const totalSaved = baseAmount + taggedAmount;
+  const targetAmount = Math.max(1, goal.targetAmount);
+  const percentage = Math.min(100, Math.round((totalSaved / targetAmount) * 1000) / 10);
+  const remainingAmount = Math.max(0, targetAmount - totalSaved);
+  const isCompleted = totalSaved >= targetAmount;
+
+  return {
+    baseAmount,
+    taggedAmount,
+    totalSaved,
+    totalAmount: totalSaved,
+    matchingCount: matchingExpenses.length,
+    percentage,
+    remainingAmount,
+    isCompleted,
+    matchingExpenses,
   };
 }

@@ -19,6 +19,7 @@ import {
   Sparkles,
   Zap,
   Activity,
+  Tag,
 } from 'lucide-react';
 import {
   PieChart as RechartsPieChart,
@@ -38,6 +39,7 @@ import {
   getDaysInMonth,
   CURRENCY_SYMBOLS,
   predictEndOfMonthSpend,
+  calculateGoalSavings,
 } from '../utils/formatters';
 import { CATEGORY_COLORS } from '../data/sampleExpenses';
 
@@ -120,13 +122,17 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
     }))
     .sort((a, b) => b.amount - a.amount);
 
-  // Savings Goals calculations
+  // Savings Goals calculations with tag-based auto tracking
   const savingsGoals = budgetSettings.savingsGoals || [];
-  const totalSaved = savingsGoals.reduce((sum, g) => sum + g.currentAmount, 0);
+  const goalsWithSavings = savingsGoals.map((g) => ({
+    goal: g,
+    savings: calculateGoalSavings(g, expenses),
+  }));
+  const totalSaved = goalsWithSavings.reduce((sum, item) => sum + item.savings.totalAmount, 0);
   const totalTarget = savingsGoals.reduce((sum, g) => sum + g.targetAmount, 0);
   const overallPercentage = totalTarget > 0 ? (totalSaved / totalTarget) * 100 : 0;
   const totalRemaining = Math.max(0, totalTarget - totalSaved);
-  const completedGoalsCount = savingsGoals.filter((g) => g.currentAmount >= g.targetAmount).length;
+  const completedGoalsCount = goalsWithSavings.filter((item) => item.savings.isCompleted).length;
 
   const handleQuickAddGoalSavings = (goalId: string, amount: number) => {
     if (!onUpdateBudgetSettings) {
@@ -983,10 +989,11 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
         {savingsGoals.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-5">
             {savingsGoals.map((goal) => {
-              const pct = goal.targetAmount > 0 ? (goal.currentAmount / goal.targetAmount) * 100 : 0;
-              const isAchieved = goal.currentAmount >= goal.targetAmount;
-              const remaining = Math.max(0, goal.targetAmount - goal.currentAmount);
+              const savings = calculateGoalSavings(goal, expenses);
+              const isAchieved = savings.isCompleted;
+              const remaining = Math.max(0, goal.targetAmount - savings.totalAmount);
               const catColors = CATEGORY_COLORS[goal.category];
+              const activeTag = goal.tag || goal.name;
 
               // Calculate this month's spending in this category to show connection
               const monthSpendInCat = monthExpenses
@@ -1003,9 +1010,15 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
                   <div>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <h4 className="font-bold text-xs sm:text-sm text-slate-950 dark:text-white truncate">
-                          {goal.name}
-                        </h4>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="font-bold text-xs sm:text-sm text-slate-950 dark:text-white truncate">
+                            {goal.name}
+                          </h4>
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30">
+                            <Tag className="w-2.5 h-2.5" />
+                            #{activeTag}
+                          </span>
+                        </div>
                         {goal.notes && (
                           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
                             {goal.notes}
@@ -1035,7 +1048,7 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
                     <div className="flex items-baseline justify-between font-mono tabular-nums text-xs">
                       <div>
                         <span className="text-base sm:text-lg font-bold text-slate-950 dark:text-white">
-                          {formatCurrency(goal.currentAmount, currency)}
+                          {formatCurrency(savings.totalAmount, currency)}
                         </span>
                         <span className="text-slate-500 text-[11px] ml-1">
                           / {formatCurrency(goal.targetAmount, currency)}
@@ -1049,7 +1062,7 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
                             : 'text-slate-700 dark:text-slate-300'
                         }`}
                       >
-                        {pct.toFixed(1)}%
+                        {savings.percentage.toFixed(1)}%
                       </span>
                     </div>
 
@@ -1058,27 +1071,37 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
                       <div
                         className="h-full rounded-full transition-all duration-300"
                         style={{
-                          width: `${Math.min(100, pct)}%`,
+                          width: `${Math.min(100, savings.percentage)}%`,
                           backgroundColor: catColors?.bar || '#10b981',
                         }}
                       />
                     </div>
 
-                    {/* Remaining or Achieved Status */}
-                    <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-slate-500 pt-0.5">
-                      {isAchieved ? (
-                        <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                          <Check className="w-3 h-3 stroke-[2.5]" />
-                          Goal Target Reached!
+                    {/* Breakdown & Remaining / Achieved Status */}
+                    <div className="text-[11px] font-mono tabular-nums text-slate-500 space-y-0.5 pt-0.5">
+                      <div className="flex items-center justify-between">
+                        {isAchieved ? (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                            <Check className="w-3 h-3 stroke-[2.5]" />
+                            Goal Target Reached!
+                          </span>
+                        ) : (
+                          <span>{formatCurrency(remaining, currency)} remaining</span>
+                        )}
+                        <span>
+                          {catCap
+                            ? `Mo. Cap: ${formatCurrency(catCap, currency)}`
+                            : 'No category cap'}
                         </span>
-                      ) : (
-                        <span>{formatCurrency(remaining, currency)} remaining</span>
-                      )}
-                      <span>
-                        {catCap
-                          ? `Mo. Cap: ${formatCurrency(catCap, currency)}`
-                          : 'No category cap'}
-                      </span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                        <span>
+                          {savings.matchingExpenses.length} tagged txs ({formatCurrency(savings.taggedAmount, currency)})
+                        </span>
+                        {savings.baseAmount > 0 && (
+                          <span>Base: {formatCurrency(savings.baseAmount, currency)}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
 

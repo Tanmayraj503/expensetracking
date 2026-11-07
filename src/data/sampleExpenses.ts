@@ -55,9 +55,10 @@ export const DEFAULT_BUDGET_SETTINGS: BudgetSettings = {
   savingsGoals: [
     {
       id: 'goal-emergency-fund',
-      name: 'Emergency Buffer Fund',
+      name: 'Emergency Fund',
+      tag: 'Emergency Fund',
       targetAmount: 6000,
-      currentAmount: 3450,
+      currentAmount: 2450,
       category: 'Housing',
       targetDate: '2027-06-30',
       notes: '6-month emergency reserve cushion',
@@ -65,9 +66,10 @@ export const DEFAULT_BUDGET_SETTINGS: BudgetSettings = {
     },
     {
       id: 'goal-vacation-travel',
-      name: 'Summer Europe Trip',
+      name: 'Vacation',
+      tag: 'Vacation',
       targetAmount: 2800,
-      currentAmount: 1950,
+      currentAmount: 1200,
       category: 'Travel',
       targetDate: '2027-07-15',
       notes: 'Flights, coastal lodging, and itinerary excursions',
@@ -75,9 +77,10 @@ export const DEFAULT_BUDGET_SETTINGS: BudgetSettings = {
     },
     {
       id: 'goal-tech-setup',
-      name: 'Workspace Ergonomics Upgrade',
+      name: 'Workspace Upgrade',
+      tag: 'Tech Setup',
       targetAmount: 1400,
-      currentAmount: 650,
+      currentAmount: 450,
       category: 'Shopping',
       targetDate: '2026-12-31',
       notes: 'Motorized standing desk and color-accurate 4K monitor',
@@ -88,6 +91,39 @@ export const DEFAULT_BUDGET_SETTINGS: BudgetSettings = {
 
 export const SAMPLE_EXPENSES: Expense[] = [
   // October 2026 (Current Month - Up to Oct 29)
+  {
+    id: 'exp-2026-10-24-savings-emergency',
+    amount: 500.00,
+    date: '2026-10-24',
+    time: '10:00',
+    category: 'Housing',
+    merchant: 'High-Yield Savings Deposit',
+    paymentMethod: 'Bank Transfer',
+    notes: 'Emergency reserve monthly transfer',
+    tags: ['Savings', 'Emergency Fund'],
+  },
+  {
+    id: 'exp-2026-10-18-savings-vacation',
+    amount: 400.00,
+    date: '2026-10-18',
+    time: '11:15',
+    category: 'Travel',
+    merchant: 'Vacation Stash Transfer',
+    paymentMethod: 'Bank Transfer',
+    notes: 'Europe flight & holiday fund contribution',
+    tags: ['Savings', 'Vacation'],
+  },
+  {
+    id: 'exp-2026-10-12-savings-tech',
+    amount: 200.00,
+    date: '2026-10-12',
+    time: '14:20',
+    category: 'Shopping',
+    merchant: 'Tech Equipment Fund Deposit',
+    paymentMethod: 'Bank Transfer',
+    notes: 'Monitor and desk upgrade reserve',
+    tags: ['Savings', 'Tech Setup'],
+  },
   {
     id: 'exp-2026-10-29-1',
     amount: 14.50,

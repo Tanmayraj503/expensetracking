@@ -79,6 +79,7 @@ export interface SavingsGoal {
   targetDate?: string; // YYYY-MM-DD
   notes?: string;
   createdAt?: string;
+  tag?: string; // Tag identifier used to match and accumulate savings from transactions (e.g. "Emergency Fund", "Vacation")
 }
 
 export interface BudgetSettings {

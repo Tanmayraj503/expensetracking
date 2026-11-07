@@ -530,6 +530,7 @@ export default function App() {
         budgetSettings={budgetSettings}
         onSaveSettings={updateBudgetSettings}
         initialTab={budgetModalInitialTab}
+        expenses={expenses}
       />
 
       {/* Toast Notification Container */}
