@@ -23,13 +23,16 @@ import {
 import { processRecurringRules } from './utils/recurring';
 import { SAMPLE_EXPENSES, DEFAULT_BUDGET_SETTINGS } from './data/sampleExpenses';
 import { formatCurrency, formatMonthYear } from './utils/formatters';
-import { CheckCircle2, Info, AlertCircle, X } from 'lucide-react';
+import { CheckCircle2, Info, AlertCircle, X, Search } from 'lucide-react';
 
 export default function App() {
   const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
   const [budgetSettings, setBudgetSettings] = useState<BudgetSettings>(() => loadBudgetSettings());
   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>(() => loadRecurringRules());
   
+  // Global Search Filter State
+  const [globalSearchQuery, setGlobalSearchQuery] = useState<string>('');
+
   // Navigation State
   const [currentTab, setCurrentTab] = useState<AppTab>('daily');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
@@ -164,6 +167,22 @@ export default function App() {
     });
     return Array.from(set).slice(0, 10);
   }, [expenses]);
+
+  // Global search filtering across all views: merchant, category, note, or tag
+  const filteredExpenses = useMemo(() => {
+    const q = globalSearchQuery.trim().toLowerCase();
+    if (!q) return expenses;
+    const words = q.split(/\s+/).filter(Boolean);
+    return expenses.filter((e) => {
+      return words.every((word) => {
+        const matchMerchant = e.merchant.toLowerCase().includes(word);
+        const matchCategory = e.category.toLowerCase().includes(word);
+        const matchNotes = Boolean(e.notes && e.notes.toLowerCase().includes(word));
+        const matchTags = Boolean(e.tags && e.tags.some((t) => t.toLowerCase().includes(word)));
+        return matchMerchant || matchCategory || matchNotes || matchTags;
+      });
+    });
+  }, [expenses, globalSearchQuery]);
 
   // Handlers for Expenses
   const handleOpenAddExpense = (datePreset?: string) => {
@@ -399,7 +418,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Contextual Nav */}
+        {/* Top Contextual Nav with Global Search */}
         <TopNav
           currentTab={currentTab}
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
@@ -408,13 +427,55 @@ export default function App() {
           currency={budgetSettings.currency}
           theme={theme}
           onToggleTheme={toggleTheme}
+          searchQuery={globalSearchQuery}
+          onSearchChange={setGlobalSearchQuery}
+          matchingCount={filteredExpenses.length}
+          totalCount={expenses.length}
+          filteredExpenses={filteredExpenses}
+          onNavigateToTab={(tab) => setCurrentTab(tab)}
         />
+
+        {/* Global Filter Active Indicator Bar */}
+        {globalSearchQuery.trim() && (
+          <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-800/60 px-4 sm:px-6 lg:px-8 py-2 text-xs flex items-center justify-between gap-3 transition-colors">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="p-1 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 shrink-0">
+                <Search className="w-3.5 h-3.5" />
+              </div>
+              <div className="text-slate-800 dark:text-slate-200 truncate">
+                <span className="font-semibold text-emerald-700 dark:text-emerald-400">Global Search Active:</span>{' '}
+                Filtered by <span className="font-semibold font-mono bg-white dark:bg-slate-900 px-1.5 py-0.5 rounded border border-emerald-300 dark:border-emerald-700">"{globalSearchQuery}"</span> &bull; Showing{' '}
+                <span className="font-bold font-mono text-emerald-700 dark:text-emerald-400">{filteredExpenses.length}</span> of{' '}
+                <span className="font-mono text-slate-500">{expenses.length}</span> expenses in {currentTab === 'daily' ? 'Daily Tracker' : currentTab === 'monthly' ? 'Monthly Tracker' : currentTab === 'ledger' ? 'Ledger' : currentTab === 'insights' ? 'Insights' : currentTab}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {currentTab !== 'ledger' && (
+                <button
+                  type="button"
+                  onClick={() => setCurrentTab('ledger')}
+                  className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:underline hidden sm:inline"
+                >
+                  View in Ledger &rarr;
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setGlobalSearchQuery('')}
+                className="px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-800/80 rounded hover:bg-emerald-100 dark:hover:bg-emerald-950 transition-colors flex items-center gap-1 shadow-2xs"
+              >
+                <X className="w-3 h-3" />
+                <span>Clear Filter</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Viewport Content */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
           {currentTab === 'daily' && (
             <DailyTracker
-              expenses={expenses}
+              expenses={filteredExpenses}
               selectedYearMonth={selectedYearMonth}
               selectedDate={selectedDate}
               onSelectDate={handleSelectDate}
@@ -428,7 +489,7 @@ export default function App() {
 
           {currentTab === 'monthly' && (
             <MonthlyTracker
-              expenses={expenses}
+              expenses={filteredExpenses}
               selectedYearMonth={selectedYearMonth}
               onSelectYearMonth={handleSelectYearMonth}
               budgetSettings={budgetSettings}
@@ -440,7 +501,7 @@ export default function App() {
 
           {currentTab === 'ledger' && (
             <ExpenseList
-              expenses={expenses}
+              expenses={filteredExpenses}
               budgetSettings={budgetSettings}
               onEditExpense={handleOpenEditExpense}
               onDeleteExpense={handleDeleteExpense}
@@ -463,7 +524,7 @@ export default function App() {
 
           {currentTab === 'insights' && (
             <InsightsView
-              expenses={expenses}
+              expenses={filteredExpenses}
               budgetSettings={budgetSettings}
               selectedYearMonth={selectedYearMonth}
               onSelectYearMonth={handleSelectYearMonth}
