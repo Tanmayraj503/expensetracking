@@ -18,9 +18,11 @@ import {
   RotateCcw,
   Check,
   FileText,
+  Receipt,
 } from 'lucide-react';
 import { Expense, ExpenseCategory, BudgetSettings } from '../types';
 import { CATEGORIES, CATEGORY_COLORS, PAYMENT_METHODS } from '../data/sampleExpenses';
+import { ReceiptPreviewModal } from './ReceiptPreviewModal';
 import {
   formatCurrency,
   formatDateLabel,
@@ -82,6 +84,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
   const [endDate, setEndDate] = useState<string>('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
   const [showDateRangeCustom, setShowDateRangeCustom] = useState<boolean>(false);
+  const [previewReceiptExpense, setPreviewReceiptExpense] = useState<Expense | null>(null);
 
   const currency = budgetSettings.currency;
 
@@ -1011,6 +1014,21 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
                               </div>
                             )}
 
+                            {/* Attached physical receipt badge */}
+                            {expense.receiptImage && (
+                              <div className="pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewReceiptExpense(expense)}
+                                  className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800/80 transition-all cursor-pointer group shadow-2xs"
+                                  title="View captured physical receipt"
+                                >
+                                  <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform" />
+                                  <span>Receipt Attached</span>
+                                </button>
+                              </div>
+                            )}
+
                             {expense.notes && (
                               <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 italic">
                                 <FileText className="w-3 h-3 text-slate-400 shrink-0" />
@@ -1117,6 +1135,21 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
                         </div>
                       )}
 
+                      {/* Attached physical receipt badge */}
+                      {expense.receiptImage && (
+                        <div className="pt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewReceiptExpense(expense)}
+                            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800/80 transition-all cursor-pointer group shadow-2xs"
+                            title="View captured physical receipt"
+                          >
+                            <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform" />
+                            <span>Receipt Attached</span>
+                          </button>
+                        </div>
+                      )}
+
                       {/* Notes in flat view */}
                       {expense.notes && (
                         <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 italic pt-0.5">
@@ -1206,6 +1239,18 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
           </div>
         </div>
       )}
+
+      {/* Full-resolution Receipt Preview Lightbox */}
+      <ReceiptPreviewModal
+        isOpen={!!previewReceiptExpense}
+        onClose={() => setPreviewReceiptExpense(null)}
+        receiptImage={previewReceiptExpense?.receiptImage || null}
+        merchant={previewReceiptExpense?.merchant}
+        amount={previewReceiptExpense?.amount}
+        date={previewReceiptExpense?.date}
+        category={previewReceiptExpense?.category}
+        currency={currency}
+      />
     </div>
   );
 };
