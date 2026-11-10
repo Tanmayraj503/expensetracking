@@ -24,10 +24,8 @@ import {
   RotateCcw,
   Tag,
   X,
-  Receipt,
 } from 'lucide-react';
 import { Expense, BudgetSettings, DaySummary, FrequentExpensePreset, ExpenseCategory, PaymentMethod } from '../types';
-import { ReceiptPreviewModal } from './ReceiptPreviewModal';
 import {
   formatCurrency,
   formatDateLabel,
@@ -65,7 +63,6 @@ export const DailyTracker: React.FC<DailyTrackerProps> = ({
   const [frequentPresets, setFrequentPresets] = useState<FrequentExpensePreset[]>(() => loadFrequentExpenses());
   const [justLoggedId, setJustLoggedId] = useState<string | null>(null);
   const [isAddPresetModalOpen, setIsAddPresetModalOpen] = useState(false);
-  const [previewReceiptExpense, setPreviewReceiptExpense] = useState<Expense | null>(null);
 
   // New Preset form state
   const [newPresetName, setNewPresetName] = useState('');
@@ -769,21 +766,6 @@ export const DailyTracker: React.FC<DailyTrackerProps> = ({
                         </div>
                       )}
 
-                      {/* Attached physical receipt badge */}
-                      {expense.receiptImage && (
-                        <div className="pt-1">
-                          <button
-                            type="button"
-                            onClick={() => setPreviewReceiptExpense(expense)}
-                            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800/80 transition-all cursor-pointer group shadow-2xs"
-                            title="View captured physical receipt"
-                          >
-                            <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform" />
-                            <span>Receipt Attached</span>
-                          </button>
-                        </div>
-                      )}
-
                       {expense.notes && (
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 italic truncate">
                           "{expense.notes}"
@@ -1006,18 +988,6 @@ export const DailyTracker: React.FC<DailyTrackerProps> = ({
           </div>
         </div>
       )}
-
-      {/* Full-resolution Receipt Preview Lightbox */}
-      <ReceiptPreviewModal
-        isOpen={!!previewReceiptExpense}
-        onClose={() => setPreviewReceiptExpense(null)}
-        receiptImage={previewReceiptExpense?.receiptImage || null}
-        merchant={previewReceiptExpense?.merchant}
-        amount={previewReceiptExpense?.amount}
-        date={previewReceiptExpense?.date}
-        category={previewReceiptExpense?.category}
-        currency={budgetSettings.currency}
-      />
     </div>
   );
 };

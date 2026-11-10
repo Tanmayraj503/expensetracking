@@ -140,32 +140,19 @@ export function loadExpenses(): Expense[] {
       // If expenses in localStorage have no tags (from an earlier turn before sample tags were added),
       // backfill from SAMPLE_EXPENSES by ID so the user sees rich label breakdowns immediately
       const sampleTagMap = new Map<string, string[]>();
-      const sampleReceiptMap = new Map<string, string>();
       SAMPLE_EXPENSES.forEach((s) => {
         if (s.tags && s.tags.length > 0) {
           sampleTagMap.set(s.id, s.tags);
-        }
-        if (s.receiptImage) {
-          sampleReceiptMap.set(s.id, s.receiptImage);
         }
       });
 
       let needsSave = false;
       const enhanced = parsed.map((e: Expense) => {
-        let updated = { ...e };
-        let changed = false;
-        if ((!updated.tags || updated.tags.length === 0) && sampleTagMap.has(e.id)) {
-          updated.tags = sampleTagMap.get(e.id);
-          changed = true;
-        }
-        if (!updated.receiptImage && sampleReceiptMap.has(e.id)) {
-          updated.receiptImage = sampleReceiptMap.get(e.id);
-          changed = true;
-        }
-        if (changed) {
+        if ((!e.tags || e.tags.length === 0) && sampleTagMap.has(e.id)) {
           needsSave = true;
+          return { ...e, tags: sampleTagMap.get(e.id) };
         }
-        return updated;
+        return e;
       });
 
       if (needsSave) {

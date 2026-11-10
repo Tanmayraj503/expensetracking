@@ -20,21 +20,10 @@ import {
   ChevronRight,
   Receipt,
   ArrowLeft,
-  Upload,
-  Eye,
-  Trash2,
-  Image as ImageIcon,
-  Maximize2,
 } from 'lucide-react';
 import { Expense, ExpenseCategory, PaymentMethod, BudgetSettings, RecurrenceFrequency } from '../types';
 import { CATEGORIES, PAYMENT_METHODS } from '../data/sampleExpenses';
 import { CURRENCY_SYMBOLS, formatCurrency } from '../utils/formatters';
-import { ReceiptPreviewModal } from './ReceiptPreviewModal';
-import {
-  captureVideoFrameToBase64,
-  compressImageFileToBase64,
-  generateReceiptBase64,
-} from '../utils/receiptGenerator';
 
 interface ExpenseModalProps {
   isOpen: boolean;
@@ -134,13 +123,8 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   } | null>(null);
   const [scanSuccessBanner, setScanSuccessBanner] = useState<string | null>(null);
 
-  // Stored Base64 Physical Receipt Image
-  const [receiptImage, setReceiptImage] = useState<string | null>(null);
-  const [isReceiptPreviewOpen, setIsReceiptPreviewOpen] = useState(false);
-
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const currencySymbol = CURRENCY_SYMBOLS[budgetSettings.currency] || '$';
 
@@ -178,8 +162,6 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
         editingExpense.recurrenceFrequency ||
           (editingExpense.isRecurring ? 'monthly' : 'none')
       );
-      setReceiptImage(editingExpense.receiptImage || null);
-      setCapturedSnapshot(editingExpense.receiptImage || null);
       setError(null);
       setScanSuccessBanner(null);
     } else {
@@ -196,8 +178,6 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       setTags([]);
       setTagInput('');
       setRecurrenceFrequency('none');
-      setReceiptImage(null);
-      setCapturedSnapshot(null);
       setError(null);
       setScanSuccessBanner(null);
     }
@@ -206,8 +186,6 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       stopCamera();
       setIsScannerOpen(false);
       setCapturedSnapshot(null);
-      setReceiptImage(null);
-      setIsReceiptPreviewOpen(false);
       setOcrStep('idle');
       setParsedPreview(null);
     }
@@ -369,38 +347,29 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     };
   };
 
-  // Trigger capture & receipt parsing
+  // Trigger capture & simulated parsing
   const handleCaptureAndParse = () => {
-    let capturedBase64: string | null = null;
-
-    // 1. If video stream is active, capture snapshot from video element
-    if (videoRef.current && cameraStream) {
-      capturedBase64 = captureVideoFrameToBase64(videoRef.current);
+    // If video stream is active, capture snapshot from video canvas
+    if (videoRef.current && canvasRef.current && cameraStream) {
+      try {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          setCapturedSnapshot(dataUrl);
+        }
+      } catch (e) {
+        console.warn('Canvas snapshot skipped:', e);
+      }
     }
 
     const receiptToParse = useCustomReceipt && customReceiptText.trim()
       ? customReceiptText
       : SAMPLE_RECEIPTS[selectedReceiptIndex].rawText;
-
-    const parsed = parseReceiptContent(receiptToParse);
-
-    // 2. If camera stream wasn't available, generate an authentic high-res receipt photo
-    if (!capturedBase64) {
-      capturedBase64 = generateReceiptBase64(
-        {
-          merchant: parsed.merchant,
-          amount: parsed.amount,
-          date,
-          time,
-          category: parsed.category,
-          paymentMethod,
-        },
-        currencySymbol
-      );
-    }
-
-    setCapturedSnapshot(capturedBase64);
-    setReceiptImage(capturedBase64);
 
     setOcrStep('scanning');
     setOcrStatusText('Initiating camera frame capture & image preprocessing...');
@@ -414,52 +383,11 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     }, 850);
 
     setTimeout(() => {
+      const parsed = parseReceiptContent(receiptToParse);
       setParsedPreview(parsed);
       setOcrStep('success');
-      setOcrStatusText('Receipt photo captured and parsed successfully!');
+      setOcrStatusText('Receipt parsed successfully!');
     }, 1300);
-  };
-
-  // Upload receipt image from local file or native device camera
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const base64 = await compressImageFileToBase64(file);
-      setReceiptImage(base64);
-      setCapturedSnapshot(base64);
-      if (!tags.includes('Receipt')) {
-        setTags((prev) => [...prev, 'Receipt']);
-      }
-      setScanSuccessBanner('Physical receipt photo uploaded and attached to this expense!');
-    } catch (err) {
-      console.error('Failed to compress receipt file:', err);
-      setError('Could not process the selected image file. Please try another format.');
-    } finally {
-      if (e.target) e.target.value = '';
-    }
-  };
-
-  // Quick attach sample receipt photo
-  const handleAttachSampleReceipt = () => {
-    const sample = SAMPLE_RECEIPTS[selectedReceiptIndex] || SAMPLE_RECEIPTS[0];
-    const base64 = generateReceiptBase64(
-      {
-        merchant: merchant.trim() || sample.merchant,
-        amount: parseFloat(amount) || sample.amount,
-        date,
-        time,
-        category,
-        paymentMethod,
-      },
-      currencySymbol
-    );
-    setReceiptImage(base64);
-    setCapturedSnapshot(base64);
-    if (!tags.includes('Receipt')) {
-      setTags((prev) => [...prev, 'Receipt']);
-    }
-    setScanSuccessBanner('Sample physical receipt photo attached successfully!');
   };
 
   // Auto-fill values and close scanner
@@ -469,10 +397,6 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     setAmount(parsedPreview.amount.toFixed(2));
     setMerchant(parsedPreview.merchant);
     setCategory(parsedPreview.category);
-
-    if (capturedSnapshot) {
-      setReceiptImage(capturedSnapshot);
-    }
 
     // Auto-append receipt scan tag if not present
     if (!tags.includes('Receipt')) {
@@ -485,7 +409,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     );
 
     setScanSuccessBanner(
-      `Receipt photo attached & details auto-filled: ${parsedPreview.merchant} · ${formatCurrency(parsedPreview.amount, budgetSettings.currency)}`
+      `Receipt auto-filled: ${parsedPreview.merchant} · ${formatCurrency(parsedPreview.amount, budgetSettings.currency)} (${parsedPreview.category})`
     );
 
     handleCloseScanner();
@@ -537,7 +461,6 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
         tags: tags.length > 0 ? tags : undefined,
         isRecurring: isRec,
         recurrenceFrequency: isRec ? (recurrenceFrequency as RecurrenceFrequency) : undefined,
-        receiptImage: receiptImage || undefined,
       },
       editingExpense ? editingExpense.id : undefined
     );
@@ -837,59 +760,24 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
 
             {/* Scanner Action Buttons */}
             {ocrStep !== 'success' && (
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
-                {/* Center Shutter & Source Options */}
-                <div className="flex items-center justify-center gap-4 py-1">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700 transition-colors shadow-2xs"
-                    title="Upload photo from device / native camera"
-                  >
-                    <Upload className="w-4 h-4" />
-                  </button>
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={handleCloseScanner}
+                  className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
 
-                  <button
-                    type="button"
-                    onClick={handleCaptureAndParse}
-                    disabled={ocrStep === 'scanning'}
-                    className="w-14 h-14 rounded-full border-4 border-slate-200 dark:border-slate-700 bg-emerald-500 hover:bg-emerald-400 active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center shadow-lg text-slate-950 font-bold"
-                    title="Capture receipt photo & trigger OCR"
-                  >
-                    <Camera className="w-6 h-6 stroke-[2.2]" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleAttachSampleReceipt}
-                    className="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700 transition-colors shadow-2xs"
-                    title="Attach sample receipt photo"
-                  >
-                    <Receipt className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between text-xs pt-1">
-                  <button
-                    type="button"
-                    onClick={handleCloseScanner}
-                    className="px-3.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 rounded-lg transition-colors"
-                  >
-                    Back to Form
-                  </button>
-
-                  <div className="text-[11px] text-slate-500 text-center">
-                    Tap the shutter to capture photo & store base64 image
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-3 py-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:underline"
-                  >
-                    Use File Upload
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleCaptureAndParse}
+                  disabled={ocrStep === 'scanning'}
+                  className="px-5 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 rounded-lg transition-colors shadow-sm flex items-center gap-2"
+                >
+                  <Scan className="w-4 h-4 stroke-[2.2]" />
+                  <span>Capture & Parse Receipt</span>
+                </button>
               </div>
             )}
           </div>
@@ -1158,137 +1046,6 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
               )}
             </div>
 
-            {/* Physical Receipt Photo Section */}
-            <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Camera className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                    Physical Receipt Photo
-                  </span>
-                  {receiptImage && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 font-semibold">
-                      Attached
-                    </span>
-                  )}
-                </div>
-
-                {/* Hidden native camera/file input */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-
-                {!receiptImage ? (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md transition-colors"
-                      title="Upload receipt image from device"
-                    >
-                      <Upload className="w-3 h-3 inline mr-1" />
-                      <span>Upload</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleOpenScanner}
-                      className="px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/70 hover:bg-emerald-100 dark:hover:bg-emerald-900 border border-emerald-300 dark:border-emerald-800 rounded-md transition-colors flex items-center gap-1 shadow-2xs"
-                    >
-                      <Camera className="w-3 h-3" />
-                      <span>Camera Access</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setIsReceiptPreviewOpen(true)}
-                      className="px-2 py-1 text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md transition-colors flex items-center gap-1"
-                    >
-                      <Eye className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                      <span>View Full</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleOpenScanner}
-                      className="px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md transition-colors"
-                      title="Retake receipt photo"
-                    >
-                      <span>Retake</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReceiptImage(null);
-                        setCapturedSnapshot(null);
-                      }}
-                      className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded transition-colors"
-                      title="Remove attached receipt"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Receipt Image Card or Empty Prompt */}
-              {receiptImage ? (
-                <div className="flex items-center gap-3 p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
-                  <div
-                    onClick={() => setIsReceiptPreviewOpen(true)}
-                    className="w-14 h-16 rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0 cursor-pointer group relative bg-slate-100 dark:bg-slate-800"
-                  >
-                    <img
-                      src={receiptImage}
-                      alt="Receipt thumbnail"
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                    />
-                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
-                      <Eye className="w-4 h-4" />
-                    </div>
-                  </div>
-
-                  <div className="min-w-0 flex-1 text-xs">
-                    <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
-                      <span>Physical Receipt Attached</span>
-                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">
-                        (Stored in Expense)
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
-                      Base64 image stored with record for audits & tax reference.
-                    </p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <button
-                        type="button"
-                        onClick={() => setIsReceiptPreviewOpen(true)}
-                        className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-0.5"
-                      >
-                        <span>Inspect receipt image</span>
-                        <ChevronRight className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between text-[11px] text-slate-500">
-                  <span>Capture physical paper receipt to store proof of purchase with this transaction.</span>
-                  <button
-                    type="button"
-                    onClick={handleAttachSampleReceipt}
-                    className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline font-medium shrink-0 ml-2"
-                  >
-                    + Sample Receipt
-                  </button>
-                </div>
-              )}
-            </div>
-
             {/* Notes */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -1322,18 +1079,6 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
             </div>
           </form>
         )}
-
-        {/* Receipt Fullscreen Lightbox Modal */}
-        <ReceiptPreviewModal
-          isOpen={isReceiptPreviewOpen}
-          onClose={() => setIsReceiptPreviewOpen(false)}
-          receiptImage={receiptImage}
-          merchant={merchant || 'Expense Receipt'}
-          amount={parseFloat(amount) || undefined}
-          date={date}
-          category={category}
-          currency={budgetSettings.currency}
-        />
       </div>
     </div>
   );
