@@ -45,9 +45,12 @@ LedgerPulse is a modern, high-performance personal finance management applicatio
 - Automated detection and logging of recurring bills (weekly, monthly, quarterly, yearly).
 - Monthly projection of fixed subscription overhead.
 
-### 7. Smart Expense Modal & Receipt Scanner Simulation
-- Log one-off or recurring expenses with full tag, category, and payment method attribution.
-- **Camera / Receipt Scanner Simulation**: Auto-fills merchant, amount, and category fields by simulating receipt OCR.
+### 7. Smart Expense Modal & Physical Receipt Photo Capture
+- **Camera Access & Receipt Photo Capture**: Trigger device camera or native photo capture directly in `ExpenseModal` to photograph physical paper receipts.
+- **Base64 Storage & Preservation**: Compresses and stores high-resolution receipt photo data URLs (`expense.receiptImage`) directly within the expense object for persistent audit records.
+- **OCR Auto-fill Engine**: Automatically parses merchant name, line items, and total amount to pre-populate form fields upon capture.
+- **Receipt Inspection Lightbox**: Dedicated full-resolution modal with interactive zoom in/out, pan, and direct image download capabilities.
+- **Ledger & Daily View Badging**: Visual "Receipt Attached" badge indicators in both Ledger and Daily views, allowing users to reference original receipts with a single click.
 
 ### 8. User Experience & Design
 - **Collapsible Sidebar**: Space-efficient navigation with collapsible desktop sidebar and responsive mobile drawer.

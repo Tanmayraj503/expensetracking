@@ -1,4 +1,5 @@
 import { Expense, ExpenseCategory, BudgetSettings } from '../types';
+import { generateReceiptBase64 } from '../utils/receiptGenerator';
 
 export const CATEGORIES: ExpenseCategory[] = [
   'Housing',
@@ -134,6 +135,19 @@ export const SAMPLE_EXPENSES: Expense[] = [
     paymentMethod: 'Digital Wallet',
     notes: 'Morning pour-over and cinnamon roll',
     tags: ['Personal', 'Routine'],
+    receiptImage: generateReceiptBase64({
+      merchant: 'Blue Bottle Coffee',
+      amount: 14.50,
+      date: '2026-10-29',
+      time: '08:45',
+      category: 'Dining & Drinks',
+      paymentMethod: 'Digital Wallet',
+      items: [
+        { name: 'Hayes Valley Pour Over', price: 6.75 },
+        { name: 'Cardamom Cinnamon Roll', price: 6.50 },
+        { name: 'Local Sales Tax (8.75%)', price: 1.25 },
+      ],
+    }),
   },
   {
     id: 'exp-2026-10-29-2',
@@ -145,6 +159,24 @@ export const SAMPLE_EXPENSES: Expense[] = [
     paymentMethod: 'Credit Card',
     notes: 'Produce and pantry essentials',
     tags: ['Essential', 'Personal'],
+    receiptImage: generateReceiptBase64({
+      merchant: "Trader Joe's",
+      amount: 42.80,
+      date: '2026-10-29',
+      time: '12:30',
+      category: 'Groceries',
+      paymentMethod: 'Credit Card',
+      items: [
+        { name: 'Organic Honeycrisp Apples', price: 5.49 },
+        { name: 'Almond Beverage 64oz', price: 3.29 },
+        { name: 'Whole Wheat Sourdough', price: 4.99 },
+        { name: 'Cold Smoked Wild Salmon', price: 11.99 },
+        { name: 'Organic Baby Spinach', price: 2.99 },
+        { name: 'Dark Chocolate Peanut Cups', price: 4.49 },
+        { name: 'Sparkling Mineral Water 6pk', price: 4.99 },
+        { name: 'State Recycling Fee', price: 4.57 },
+      ],
+    }),
   },
   {
     id: 'exp-2026-10-28-1',

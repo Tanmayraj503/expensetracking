@@ -10,6 +10,7 @@ import {
   X,
   ArrowRight,
   Tag,
+  FileDown,
 } from 'lucide-react';
 import { AppTab } from './Sidebar';
 import { Expense } from '../types';
@@ -30,6 +31,7 @@ interface TopNavProps {
   totalCount?: number;
   filteredExpenses?: Expense[];
   onNavigateToTab?: (tab: AppTab) => void;
+  onOpenPdfExport?: () => void;
 }
 
 const TAB_TITLES: Record<AppTab, { title: string; subtitle: string }> = {
@@ -86,6 +88,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   totalCount = 0,
   filteredExpenses = [],
   onNavigateToTab,
+  onOpenPdfExport,
 }) => {
   const meta = TAB_TITLES[currentTab];
   const inputRef = useRef<HTMLInputElement>(null);
@@ -360,6 +363,18 @@ export const TopNav: React.FC<TopNavProps> = ({
           >
             <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
             <span>Targets</span>
+          </button>
+
+          {/* Export PDF Button */}
+          <button
+            type="button"
+            onClick={onOpenPdfExport}
+            className="p-2 sm:px-2.5 sm:py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs"
+            title="Download Spending Statement in PDF format (Weekly, Monthly, Yearly)"
+            aria-label="Download Spending Statement in PDF format"
+          >
+            <FileDown className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[2.2]" />
+            <span className="hidden md:inline font-medium">Export PDF</span>
           </button>
 
           <button

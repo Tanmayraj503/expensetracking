@@ -18,6 +18,7 @@ import {
   RotateCcw,
   Check,
   FileText,
+  FileDown,
 } from 'lucide-react';
 import { Expense, ExpenseCategory, BudgetSettings } from '../types';
 import { CATEGORIES, CATEGORY_COLORS, PAYMENT_METHODS } from '../data/sampleExpenses';
@@ -52,6 +53,7 @@ interface ExpenseListProps {
   onDeleteExpense: (id: string) => void;
   onAddExpense: () => void;
   onExportCsv: () => void;
+  onOpenPdfExport?: () => void;
 }
 
 export const ExpenseList: React.FC<ExpenseListProps> = ({
@@ -61,6 +63,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
   onDeleteExpense,
   onAddExpense,
   onExportCsv,
+  onOpenPdfExport,
 }) => {
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -349,6 +352,18 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
               <span>Export CSV</span>
             </button>
+
+            {onOpenPdfExport && (
+              <button
+                type="button"
+                onClick={onOpenPdfExport}
+                className="px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shadow-2xs"
+                title="Download Spending Statement in PDF format (Weekly, Monthly, Yearly)"
+              >
+                <FileDown className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[2.2]" />
+                <span>Export PDF</span>
+              </button>
+            )}
 
             <button
               type="button"

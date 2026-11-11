@@ -20,6 +20,7 @@ import {
   Zap,
   Activity,
   Tag,
+  FileDown,
 } from 'lucide-react';
 import {
   PieChart as RechartsPieChart,
@@ -51,6 +52,7 @@ interface MonthlyTrackerProps {
   onOpenBudgetModal: (initialTab?: 'budget' | 'goals') => void;
   onUpdateBudgetSettings?: (newSettings: BudgetSettings) => void;
   theme?: 'dark' | 'light';
+  onOpenPdfExport?: (initialPeriod?: 'weekly' | 'monthly' | 'yearly', initialYearMonth?: string) => void;
 }
 
 export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
@@ -61,6 +63,7 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
   onOpenBudgetModal,
   onUpdateBudgetSettings,
   theme = 'dark',
+  onOpenPdfExport,
 }) => {
   const [hoveredDayPoint, setHoveredDayPoint] = useState<{
     day: number;
@@ -294,6 +297,18 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
               className="px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-lg transition-colors whitespace-nowrap"
             >
               Jump to Current Month (Oct 2026)
+            </button>
+          )}
+
+          {onOpenPdfExport && (
+            <button
+              type="button"
+              onClick={() => onOpenPdfExport('monthly', selectedYearMonth)}
+              className="px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shadow-2xs"
+              title="Download Monthly Statement PDF"
+            >
+              <FileDown className="w-3.5 h-3.5 stroke-[2.2]" />
+              <span>Export Monthly PDF</span>
             </button>
           )}
 

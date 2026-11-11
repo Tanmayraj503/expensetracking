@@ -8,6 +8,8 @@ import { RecurringView } from './components/RecurringView';
 import { InsightsView } from './components/InsightsView';
 import { ExpenseModal } from './components/ExpenseModal';
 import { BudgetModal } from './components/BudgetModal';
+import { PdfExportModal } from './components/PdfExportModal';
+import { PdfReportPeriod } from './utils/pdfGenerator';
 import { Expense, BudgetSettings, RecurringRule } from './types';
 import {
   loadExpenses,
@@ -23,7 +25,7 @@ import {
 import { processRecurringRules } from './utils/recurring';
 import { SAMPLE_EXPENSES, DEFAULT_BUDGET_SETTINGS } from './data/sampleExpenses';
 import { formatCurrency, formatMonthYear } from './utils/formatters';
-import { CheckCircle2, Info, AlertCircle, X, Search } from 'lucide-react';
+import { CheckCircle2, Info, AlertCircle, X, Search, FileDown } from 'lucide-react';
 
 export default function App() {
   const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
@@ -48,6 +50,11 @@ export default function App() {
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
   const [budgetModalInitialTab, setBudgetModalInitialTab] = useState<'budget' | 'goals'>('budget');
   const [addExpenseDefaultDate, setAddExpenseDefaultDate] = useState<string>('2026-10-29');
+
+  // PDF Export Modal State
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+  const [pdfModalInitialPeriod, setPdfModalInitialPeriod] = useState<PdfReportPeriod>('monthly');
+  const [pdfModalInitialYearMonth, setPdfModalInitialYearMonth] = useState<string>('2026-10');
 
   // Notification Toast
   const [toast, setToast] = useState<{
@@ -396,6 +403,16 @@ export default function App() {
     setIsBudgetModalOpen(true);
   };
 
+  const handleOpenPdfModal = (period: PdfReportPeriod = 'monthly', yearMonth?: string) => {
+    setPdfModalInitialPeriod(period);
+    if (yearMonth) {
+      setPdfModalInitialYearMonth(yearMonth);
+    } else {
+      setPdfModalInitialYearMonth(selectedYearMonth || '2026-10');
+    }
+    setIsPdfModalOpen(true);
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex font-sans antialiased selection:bg-emerald-500/20 selection:text-emerald-700 dark:selection:text-emerald-300 transition-colors duration-200">
       {/* Collapsible Sidebar */}
@@ -409,6 +426,7 @@ export default function App() {
         onOpenAddExpense={() => handleOpenAddExpense()}
         onOpenBudgetModal={() => handleOpenBudgetModal('budget')}
         onExportCsv={handleExportCsvAction}
+        onOpenPdfExport={() => handleOpenPdfModal('monthly')}
         onResetData={handleResetData}
         budgetSettings={budgetSettings}
         activeRecurringRulesCount={recurringRules.filter((r) => r.isActive).length}
@@ -418,7 +436,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Contextual Nav with Global Search */}
+        {/* Top Contextual Nav with Global Search & PDF Export */}
         <TopNav
           currentTab={currentTab}
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
@@ -433,6 +451,9 @@ export default function App() {
           totalCount={expenses.length}
           filteredExpenses={filteredExpenses}
           onNavigateToTab={(tab) => setCurrentTab(tab)}
+          onOpenPdfExport={() =>
+            handleOpenPdfModal(currentTab === 'daily' ? 'weekly' : currentTab === 'monthly' ? 'monthly' : 'monthly')
+          }
         />
 
         {/* Global Filter Active Indicator Bar */}
@@ -496,6 +517,7 @@ export default function App() {
               onOpenBudgetModal={handleOpenBudgetModal}
               onUpdateBudgetSettings={updateBudgetSettings}
               theme={theme}
+              onOpenPdfExport={(p, ym) => handleOpenPdfModal(p || 'monthly', ym)}
             />
           )}
 
@@ -507,6 +529,7 @@ export default function App() {
               onDeleteExpense={handleDeleteExpense}
               onAddExpense={() => handleOpenAddExpense()}
               onExportCsv={handleExportCsvAction}
+              onOpenPdfExport={() => handleOpenPdfModal('monthly')}
             />
           )}
 
@@ -544,6 +567,15 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-4 text-slate-600 dark:text-slate-500">
+              <button
+                type="button"
+                onClick={() => handleOpenPdfModal('monthly')}
+                className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors flex items-center gap-1 font-medium"
+              >
+                <FileDown className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Export PDF</span>
+              </button>
+              <span>·</span>
               <button
                 type="button"
                 onClick={handleExportCsvAction}
@@ -592,6 +624,19 @@ export default function App() {
         onSaveSettings={updateBudgetSettings}
         initialTab={budgetModalInitialTab}
         expenses={expenses}
+      />
+
+      {/* Spending Statement PDF Export Modal */}
+      <PdfExportModal
+        isOpen={isPdfModalOpen}
+        onClose={() => setIsPdfModalOpen(false)}
+        expenses={expenses}
+        budgetSettings={budgetSettings}
+        initialPeriod={pdfModalInitialPeriod}
+        initialYearMonth={pdfModalInitialYearMonth}
+        onExportSuccess={(filename, count, total) => {
+          showToast(`Downloaded ${filename} (${count} records, ${formatCurrency(total, budgetSettings.currency)})`, 'success');
+        }}
       />
 
       {/* Toast Notification Container */}

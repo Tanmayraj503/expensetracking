@@ -14,6 +14,7 @@ import {
   X,
   Sun,
   Moon,
+  FileDown,
 } from 'lucide-react';
 import { BudgetSettings, RecurringRule } from '../types';
 
@@ -29,6 +30,7 @@ interface SidebarProps {
   onOpenAddExpense: () => void;
   onOpenBudgetModal: () => void;
   onExportCsv: () => void;
+  onOpenPdfExport?: () => void;
   onResetData: () => void;
   budgetSettings: BudgetSettings;
   activeRecurringRulesCount: number;
@@ -46,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenAddExpense,
   onOpenBudgetModal,
   onExportCsv,
+  onOpenPdfExport,
   onResetData,
   budgetSettings,
   activeRecurringRulesCount,
@@ -240,6 +243,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <SlidersHorizontal className="w-4 h-4 shrink-0 text-slate-500 dark:text-slate-400" />
           {!isCollapsed && <span className="truncate">Budget Settings</span>}
         </button>
+
+        {onOpenPdfExport && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenPdfExport();
+              onCloseMobile();
+            }}
+            className={`w-full flex items-center gap-3 rounded-lg text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors ${
+              isCollapsed ? 'p-2.5 justify-center' : 'px-3 py-2'
+            }`}
+            title="Download Spending Statement in PDF format (Weekly, Monthly, Yearly)"
+          >
+            <FileDown className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400 stroke-[2.2]" />
+            {!isCollapsed && <span className="truncate font-medium">Export PDF Report</span>}
+          </button>
+        )}
 
         <button
           type="button"
