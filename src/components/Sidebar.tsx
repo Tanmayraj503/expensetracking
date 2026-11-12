@@ -96,49 +96,77 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const sidebarContent = (
-    <div className="h-full flex flex-col justify-between p-3 sm:p-4 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 transition-colors duration-200">
+    <div className={`h-full flex flex-col justify-between ${isCollapsed ? 'p-2 sm:p-2.5' : 'p-3 sm:p-4'} bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 transition-colors duration-200`}>
       {/* Top Brand & New Action */}
       <div className="space-y-4">
         {/* Brand Lockup */}
-        <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800/80">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-base tracking-tighter shrink-0 shadow-xs">
-              LP
-            </div>
-            {!isCollapsed && (
-              <div className="min-w-0">
-                <span className="text-base font-bold tracking-tight text-slate-900 dark:text-white block truncate">
-                  LedgerPulse
-                </span>
-                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium block truncate">
-                  Financial Spend Intelligence
-                </span>
+        <div
+          className={`flex ${
+            isCollapsed ? 'flex-col items-center gap-2 pb-3' : 'items-center justify-between pb-3'
+          } border-b border-slate-200 dark:border-slate-800/80 transition-all`}
+        >
+          {isCollapsed ? (
+            <>
+              {/* App Icon: Perfectly centered & unclipped */}
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="w-9 h-9 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/10 border border-emerald-500/30 hover:border-emerald-500 hover:bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-sm tracking-tighter shrink-0 shadow-xs transition-colors cursor-pointer"
+                title="LedgerPulse — Click to expand sidebar"
+                aria-label="Expand Sidebar"
+              >
+                LP
+              </button>
+
+              {/* Desktop Collapse / Expand Toggle Button: Centered right below icon */}
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="hidden md:flex p-1.5 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+                title="Expand Sidebar"
+                aria-label="Expand Sidebar"
+              >
+                <PanelLeft className="w-4 h-4" />
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 min-w-0 overflow-hidden">
+                <div className="w-9 h-9 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-base tracking-tighter shrink-0 shadow-xs">
+                  LP
+                </div>
+                <div className="min-w-0">
+                  <span className="text-base font-bold tracking-tight text-slate-900 dark:text-white block truncate">
+                    LedgerPulse
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium block truncate">
+                    Financial Spend Intelligence
+                  </span>
+                </div>
               </div>
-            )}
-          </div>
 
-          {/* Desktop Collapse Toggle */}
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className="hidden md:flex p-1.5 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors shrink-0"
-            title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-          >
-            {isCollapsed ? (
-              <PanelLeft className="w-4 h-4" />
-            ) : (
-              <PanelLeftClose className="w-4 h-4" />
-            )}
-          </button>
+              {/* Desktop Collapse Toggle */}
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="hidden md:flex p-1.5 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+                title="Collapse Sidebar"
+                aria-label="Collapse Sidebar"
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </button>
 
-          {/* Mobile Close Button */}
-          <button
-            type="button"
-            onClick={onCloseMobile}
-            className="md:hidden p-1.5 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+              {/* Mobile Close Button */}
+              <button
+                type="button"
+                onClick={onCloseMobile}
+                className="md:hidden p-1.5 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                aria-label="Close Sidebar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </>
+          )}
         </div>
 
         {/* Primary Action: Add Expense */}
