@@ -101,34 +101,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="space-y-4">
         {/* Brand Lockup */}
         <div
-          className={`flex ${
-            isCollapsed ? 'flex-col items-center gap-2 pb-3' : 'items-center justify-between pb-3'
+          className={`flex items-center ${
+            isCollapsed ? 'justify-center pb-3' : 'justify-between pb-3'
           } border-b border-slate-200 dark:border-slate-800/80 transition-all`}
         >
           {isCollapsed ? (
-            <>
-              {/* App Icon: Perfectly centered & unclipped */}
-              <button
-                type="button"
-                onClick={onToggleCollapse}
-                className="w-9 h-9 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/10 border border-emerald-500/30 hover:border-emerald-500 hover:bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-sm tracking-tighter shrink-0 shadow-xs transition-colors cursor-pointer"
-                title="LedgerPulse — Click to expand sidebar"
-                aria-label="Expand Sidebar"
-              >
+            /* App Icon with hover-revealed Expand Sidebar button */
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className="group relative w-9 h-9 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/10 border border-emerald-500/30 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:hover:text-white font-bold text-sm tracking-tighter shrink-0 shadow-xs transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+              title="Expand Sidebar"
+              aria-label="Expand Sidebar"
+            >
+              <span className="transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0">
                 LP
-              </button>
-
-              {/* Desktop Collapse / Expand Toggle Button: Centered right below icon */}
-              <button
-                type="button"
-                onClick={onToggleCollapse}
-                className="hidden md:flex p-1.5 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors shrink-0"
-                title="Expand Sidebar"
-                aria-label="Expand Sidebar"
-              >
+              </span>
+              <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity duration-150">
                 <PanelLeft className="w-4 h-4" />
-              </button>
-            </>
+              </span>
+            </button>
           ) : (
             <>
               <div className="flex items-center gap-3 min-w-0 overflow-hidden">
