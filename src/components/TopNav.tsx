@@ -11,6 +11,7 @@ import {
   ArrowRight,
   Tag,
   FileDown,
+  Keyboard,
 } from 'lucide-react';
 import { AppTab } from './Sidebar';
 import { Expense } from '../types';
@@ -32,6 +33,8 @@ interface TopNavProps {
   filteredExpenses?: Expense[];
   onNavigateToTab?: (tab: AppTab) => void;
   onOpenPdfExport?: () => void;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
+  onOpenShortcuts?: () => void;
 }
 
 const TAB_TITLES: Record<AppTab, { title: string; subtitle: string }> = {
@@ -89,42 +92,30 @@ export const TopNav: React.FC<TopNavProps> = ({
   filteredExpenses = [],
   onNavigateToTab,
   onOpenPdfExport,
+  searchInputRef,
+  onOpenShortcuts,
 }) => {
   const meta = TAB_TITLES[currentTab];
-  const inputRef = useRef<HTMLInputElement>(null);
+  const internalInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = searchInputRef || internalInputRef;
   const dropdownRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFocused, setIsFocused] = useState(false);
 
   const hasQuery = searchQuery.trim().length > 0;
 
-  // Keyboard shortcut listener: Cmd+K / Ctrl+K or '/' to focus search input
+  // Escape blurs search input & closes flyout when focused inside search
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      } else if (
-        e.key === '/' &&
-        document.activeElement?.tagName !== 'INPUT' &&
-        document.activeElement?.tagName !== 'TEXTAREA' &&
-        document.activeElement?.tagName !== 'SELECT'
-      ) {
-        e.preventDefault();
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      } else if (e.key === 'Escape') {
-        if (isFocused) {
-          inputRef.current?.blur();
-          setIsFocused(false);
-        }
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFocused) {
+        inputRef.current?.blur();
+        setIsFocused(false);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFocused]);
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isFocused, inputRef]);
 
   // Click outside listener to dismiss quick match dropdown
   useEffect(() => {
@@ -211,10 +202,8 @@ export const TopNav: React.FC<TopNavProps> = ({
                   </button>
                 </>
               ) : (
-                <span className="hidden sm:flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-slate-800 text-[10px] font-mono text-slate-500 dark:text-slate-400 border border-slate-300/50 dark:border-slate-700/50 select-none">
-                  <kbd className="font-sans text-[9px]">Ctrl</kbd>
-                  <span>+</span>
-                  <kbd className="font-sans text-[9px]">K</kbd>
+                <span className="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-slate-800 text-[10px] font-mono text-slate-500 dark:text-slate-400 border border-slate-300/50 dark:border-slate-700/50 select-none">
+                  <kbd className="font-mono text-[10px]">/</kbd>
                 </span>
               )}
             </div>
@@ -333,14 +322,27 @@ export const TopNav: React.FC<TopNavProps> = ({
           )}
         </div>
 
-        {/* Right: Theme Toggle, Date Pill & Quick Add Button */}
+        {/* Right: Theme Toggle, Shortcuts, Date Pill & Quick Add Button */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          {/* Keyboard Shortcuts Guide Button */}
+          {onOpenShortcuts && (
+            <button
+              type="button"
+              onClick={onOpenShortcuts}
+              className="hidden sm:flex p-2 text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg transition-colors items-center justify-center shadow-2xs"
+              title="Keyboard Shortcuts (?)"
+              aria-label="Open Keyboard Shortcuts"
+            >
+              <Keyboard className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+            </button>
+          )}
+
           {/* Theme Toggle Button */}
           <button
             type="button"
             onClick={onToggleTheme}
             className="p-2 text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg transition-colors flex items-center justify-center shadow-2xs"
-            title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            title={theme === 'dark' ? 'Switch to Light Mode (T)' : 'Switch to Dark Mode (T)'}
             aria-label={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
             {theme === 'dark' ? (
@@ -359,7 +361,7 @@ export const TopNav: React.FC<TopNavProps> = ({
             type="button"
             onClick={onOpenBudgetModal}
             className="hidden lg:flex p-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg transition-colors items-center gap-1.5 shadow-2xs"
-            title="Budget Settings"
+            title="Budget Settings (B)"
           >
             <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
             <span>Targets</span>
@@ -370,7 +372,7 @@ export const TopNav: React.FC<TopNavProps> = ({
             type="button"
             onClick={onOpenPdfExport}
             className="p-2 sm:px-2.5 sm:py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs"
-            title="Download Spending Statement in PDF format (Weekly, Monthly, Yearly)"
+            title="Download Spending Statement in PDF format (E)"
             aria-label="Download Spending Statement in PDF format"
           >
             <FileDown className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[2.2]" />
@@ -380,11 +382,15 @@ export const TopNav: React.FC<TopNavProps> = ({
           <button
             type="button"
             onClick={onOpenAddExpense}
-            className="px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors flex items-center gap-1 shadow-sm whitespace-nowrap shrink-0"
+            title="Add New Expense (N)"
+            className="px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm whitespace-nowrap shrink-0"
           >
             <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
             <span className="hidden sm:inline">Add Expense</span>
             <span className="sm:hidden">Add</span>
+            <kbd className="hidden lg:inline-block px-1 py-0.2 text-[10px] font-mono font-bold bg-emerald-500/40 text-slate-950 rounded">
+              N
+            </kbd>
           </button>
         </div>
       </div>

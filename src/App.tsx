@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Sidebar, AppTab } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
 import { DailyTracker } from './components/DailyTracker';
@@ -9,6 +9,8 @@ import { InsightsView } from './components/InsightsView';
 import { ExpenseModal } from './components/ExpenseModal';
 import { BudgetModal } from './components/BudgetModal';
 import { PdfExportModal } from './components/PdfExportModal';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { PdfReportPeriod } from './utils/pdfGenerator';
 import { Expense, BudgetSettings, RecurringRule } from './types';
 import {
@@ -25,7 +27,7 @@ import {
 import { processRecurringRules } from './utils/recurring';
 import { SAMPLE_EXPENSES, DEFAULT_BUDGET_SETTINGS } from './data/sampleExpenses';
 import { formatCurrency, formatMonthYear } from './utils/formatters';
-import { CheckCircle2, Info, AlertCircle, X, Search, FileDown } from 'lucide-react';
+import { CheckCircle2, Info, AlertCircle, X, Search, FileDown, Keyboard } from 'lucide-react';
 
 export default function App() {
   const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
@@ -55,6 +57,10 @@ export default function App() {
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [pdfModalInitialPeriod, setPdfModalInitialPeriod] = useState<PdfReportPeriod>('monthly');
   const [pdfModalInitialYearMonth, setPdfModalInitialYearMonth] = useState<string>('2026-10');
+
+  // Keyboard Shortcuts Modal & Global Search Ref
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const globalSearchInputRef = useRef<HTMLInputElement>(null);
 
   // Notification Toast
   const [toast, setToast] = useState<{
@@ -413,6 +419,39 @@ export default function App() {
     setIsPdfModalOpen(true);
   };
 
+  const isAnyModalOpen =
+    isExpenseModalOpen || isBudgetModalOpen || isPdfModalOpen || isShortcutsModalOpen;
+
+  // Global Keyboard Shortcuts Listener
+  useKeyboardShortcuts({
+    isAnyModalOpen,
+    onNewExpense: () => handleOpenAddExpense(),
+    onFocusSearch: () => {
+      globalSearchInputRef.current?.focus();
+      globalSearchInputRef.current?.select();
+    },
+    onOpenBudget: () => handleOpenBudgetModal('budget'),
+    onOpenPdfExport: () =>
+      handleOpenPdfModal(currentTab === 'daily' ? 'weekly' : 'monthly'),
+    onToggleTheme: toggleTheme,
+    onToggleSidebar: () => setIsSidebarCollapsed((prev) => !prev),
+    onSwitchTab: (tab) => setCurrentTab(tab),
+    onToggleShortcutsHelp: () => setIsShortcutsModalOpen((prev) => !prev),
+    onEscape: () => {
+      if (isShortcutsModalOpen) {
+        setIsShortcutsModalOpen(false);
+      } else if (isExpenseModalOpen) {
+        setIsExpenseModalOpen(false);
+      } else if (isBudgetModalOpen) {
+        setIsBudgetModalOpen(false);
+      } else if (isPdfModalOpen) {
+        setIsPdfModalOpen(false);
+      } else if (isMobileSidebarOpen) {
+        setIsMobileSidebarOpen(false);
+      }
+    },
+  });
+
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex font-sans antialiased selection:bg-emerald-500/20 selection:text-emerald-700 dark:selection:text-emerald-300 transition-colors duration-200">
       {/* Collapsible Sidebar */}
@@ -454,6 +493,8 @@ export default function App() {
           onOpenPdfExport={() =>
             handleOpenPdfModal(currentTab === 'daily' ? 'weekly' : currentTab === 'monthly' ? 'monthly' : 'monthly')
           }
+          searchInputRef={globalSearchInputRef}
+          onOpenShortcuts={() => setIsShortcutsModalOpen(true)}
         />
 
         {/* Global Filter Active Indicator Bar */}
@@ -566,7 +607,17 @@ export default function App() {
               <span className="text-slate-600 dark:text-slate-500">Daily, Monthly & Recurring Financial Intelligence</span>
             </div>
 
-            <div className="flex items-center gap-4 text-slate-600 dark:text-slate-500">
+            <div className="flex items-center gap-4 text-slate-600 dark:text-slate-500 flex-wrap justify-center">
+              <button
+                type="button"
+                onClick={() => setIsShortcutsModalOpen(true)}
+                className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors flex items-center gap-1"
+                title="Keyboard Shortcuts (?)"
+              >
+                <Keyboard className="w-3.5 h-3.5" />
+                <span>Shortcuts</span>
+              </button>
+              <span>·</span>
               <button
                 type="button"
                 onClick={() => handleOpenPdfModal('monthly')}
@@ -637,6 +688,12 @@ export default function App() {
         onExportSuccess={(filename, count, total) => {
           showToast(`Downloaded ${filename} (${count} records, ${formatCurrency(total, budgetSettings.currency)})`, 'success');
         }}
+      />
+
+      {/* Power-User Keyboard Shortcuts Guide Modal */}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
       />
 
       {/* Toast Notification Container */}
