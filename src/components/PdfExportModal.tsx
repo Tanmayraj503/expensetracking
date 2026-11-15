@@ -44,6 +44,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   const [customStartDate, setCustomStartDate] = useState<string>('2026-10-01');
   const [customEndDate, setCustomEndDate] = useState<string>('2026-10-29');
 
+  const [includeCharts, setIncludeCharts] = useState<boolean>(true);
   const [includeCategoryBreakdown, setIncludeCategoryBreakdown] = useState<boolean>(true);
   const [includeNotes, setIncludeNotes] = useState<boolean>(true);
   const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
@@ -130,12 +131,16 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       };
     }
 
-    // Custom
+    // Custom (normalize order if start > end)
+    const rawStart = customStartDate || '2026-10-01';
+    const rawEnd = customEndDate || '2026-10-29';
+    const normStart = rawStart <= rawEnd ? rawStart : rawEnd;
+    const normEnd = rawStart <= rawEnd ? rawEnd : rawStart;
     return {
-      startDate: customStartDate || '2026-10-01',
-      endDate: customEndDate || '2026-10-29',
+      startDate: normStart,
+      endDate: normEnd,
       periodTitle: 'Custom Date Spending Report',
-      periodSubtitle: `Custom Period (${customStartDate} to ${customEndDate})`,
+      periodSubtitle: `Custom Period (${normStart} to ${normEnd})`,
     };
   }, [period, weeklyOption, selectedMonth, selectedYear, customStartDate, customEndDate]);
 
@@ -178,6 +183,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
         startDate,
         endDate,
         currency,
+        budgetSettings,
+        includeCharts,
         includeCategoryBreakdown,
         includeNotes,
         sortBy,
@@ -437,9 +444,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
               <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80">
                 <span className="text-[10px] text-slate-500 block">PDF Formatting</span>
                 <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 block mt-0.5">
-                  Vector A4 Table
+                  {includeCharts ? 'Charts + Vector Tables' : 'Vector A4 Table'}
                 </span>
-                <span className="text-[9px] text-slate-400">Zero text clipping</span>
+                <span className="text-[9px] text-slate-400">
+                  {includeCharts ? '6 period-exact charts' : 'Zero text clipping'}
+                </span>
               </div>
             </div>
           </div>
@@ -447,7 +456,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
           {/* Table Customization & Sort Controls */}
           <div className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-200 dark:border-slate-800/80 space-y-2 text-xs">
             <span className="font-semibold text-slate-800 dark:text-slate-200 text-[11px] uppercase tracking-wider block">
-              PDF Table Layout & Sorting Options
+              PDF Charts, Table Layout & Sorting Options
             </span>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
@@ -467,7 +476,17 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 </select>
               </div>
 
-              <div className="space-y-1.5 pt-1 sm:pt-4">
+              <div className="space-y-1.5 pt-1 sm:pt-2">
+                <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={includeCharts}
+                    onChange={(e) => setIncludeCharts(e.target.checked)}
+                    className="rounded text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Include all visual charts (Bar, Trend, Area, Donuts, Payment Bars)</span>
+                </label>
+
                 <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
                   <input
                     type="checkbox"
