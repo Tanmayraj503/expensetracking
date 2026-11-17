@@ -11,6 +11,7 @@ import { BudgetModal } from './components/BudgetModal';
 import { PdfExportModal } from './components/PdfExportModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useBudgetThresholdMonitor } from './hooks/useBudgetThresholdMonitor';
 import { PdfReportPeriod } from './utils/pdfGenerator';
 import { Expense, BudgetSettings, RecurringRule } from './types';
 import {
@@ -26,8 +27,8 @@ import {
 } from './utils/storage';
 import { processRecurringRules } from './utils/recurring';
 import { SAMPLE_EXPENSES, DEFAULT_BUDGET_SETTINGS } from './data/sampleExpenses';
-import { formatCurrency, formatMonthYear } from './utils/formatters';
-import { CheckCircle2, Info, AlertCircle, X, Search, FileDown, Keyboard } from 'lucide-react';
+import { formatCurrency } from './utils/formatters';
+import { CheckCircle2, Info, AlertCircle, AlertTriangle, X, Search, FileDown, Keyboard } from 'lucide-react';
 
 export default function App() {
   const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
@@ -62,13 +63,19 @@ export default function App() {
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const globalSearchInputRef = useRef<HTMLInputElement>(null);
 
-  // Notification Toast
-  const [toast, setToast] = useState<{
-    id: number;
-    message: string;
-    type: 'success' | 'info' | 'error';
-    undoAction?: () => void;
-  } | null>(null);
+  // Notification Toast Stack
+  const toastIdRef = useRef<number>(1);
+  const toastTimersRef = useRef<Map<number, number>>(new Map());
+  const [toasts, setToasts] = useState<
+    Array<{
+      id: number;
+      message: string;
+      type: 'success' | 'info' | 'warning' | 'error';
+      undoAction?: () => void;
+      actionLabel?: string;
+      onAction?: () => void;
+    }>
+  >([]);
 
   // Theme State: 'dark' or 'light'
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -99,14 +106,13 @@ export default function App() {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  // Auto-dismiss toast after 4 seconds
+  // Clean up toast timers on unmount
   useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => {
-      setToast(null);
-    }, 4000);
-    return () => clearTimeout(timer);
-  }, [toast]);
+    return () => {
+      toastTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      toastTimersRef.current.clear();
+    };
+  }, []);
 
   // Automatic Recurring Rules Processing on App Mount
   useEffect(() => {
@@ -147,18 +153,55 @@ export default function App() {
     showToast('Budget settings updated successfully', 'success');
   };
 
+  const dismissToast = (id: number) => {
+    const existingTimer = toastTimersRef.current.get(id);
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+      toastTimersRef.current.delete(id);
+    }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
   const showToast = (
     message: string,
-    type: 'success' | 'info' | 'error' = 'info',
-    undoAction?: () => void
+    type: 'success' | 'info' | 'warning' | 'error' = 'info',
+    undoAction?: () => void,
+    options?: { actionLabel?: string; onAction?: () => void; durationMs?: number }
   ) => {
-    setToast({
-      id: Date.now(),
-      message,
-      type,
-      undoAction,
-    });
+    const id = toastIdRef.current++;
+    const duration = options?.durationMs ?? (type === 'warning' || type === 'error' ? 6500 : 4200);
+
+    setToasts((prev) => [
+      ...prev.slice(-3),
+      {
+        id,
+        message,
+        type,
+        undoAction,
+        actionLabel: options?.actionLabel,
+        onAction: options?.onAction,
+      },
+    ]);
+
+    const timerId = window.setTimeout(() => {
+      dismissToast(id);
+    }, duration);
+    toastTimersRef.current.set(id, timerId);
   };
+
+  // Real-time & Periodic Background Budget Threshold Monitor (50%, 75%, 90%)
+  const { resetThresholdAlerts } = useBudgetThresholdMonitor({
+    expenses,
+    budgetSettings,
+    selectedYearMonth,
+    onThresholdHit: (alert) => {
+      showToast(alert.message, alert.severity, undefined, {
+        actionLabel: 'Budget',
+        onAction: () => handleOpenBudgetModal('budget'),
+        durationMs: 7000,
+      });
+    },
+  });
 
   // Extract all unique custom tags
   const availableTags = useMemo(() => {
@@ -379,6 +422,7 @@ export default function App() {
 
   const handleResetData = () => {
     if (window.confirm('Reset all expenses, recurring rules, and targets to original sample values?')) {
+      resetThresholdAlerts();
       updateExpenses(SAMPLE_EXPENSES);
       updateRecurringRules(INITIAL_RECURRING_RULES);
       setBudgetSettings(DEFAULT_BUDGET_SETTINGS);
@@ -696,38 +740,79 @@ export default function App() {
         onClose={() => setIsShortcutsModalOpen(false)}
       />
 
-      {/* Toast Notification Container */}
-      {toast && (
-        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs px-4 py-3 rounded-xl shadow-2xl transition-all">
-          {toast.type === 'success' && (
-            <CheckCircle2 className="w-4 h-4 text-emerald-500 dark:text-emerald-400 shrink-0" />
-          )}
-          {toast.type === 'info' && (
-            <Info className="w-4 h-4 text-sky-500 dark:text-sky-400 shrink-0" />
-          )}
-          {toast.type === 'error' && (
-            <AlertCircle className="w-4 h-4 text-rose-500 dark:text-rose-400 shrink-0" />
-          )}
+      {/* Toast Notification Stack */}
+      {toasts.length > 0 && (
+        <div
+          className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-md w-[calc(100%-2.5rem)] sm:w-auto pointer-events-none"
+          role="region"
+          aria-live="polite"
+          aria-label="Notifications"
+        >
+          {toasts.map((t) => {
+            const borderTone =
+              t.type === 'error'
+                ? 'border-rose-300 dark:border-rose-700/80'
+                : t.type === 'warning'
+                ? 'border-amber-300 dark:border-amber-700/80'
+                : 'border-slate-200 dark:border-slate-700';
 
-          <span className="font-medium">{toast.message}</span>
+            return (
+              <div
+                key={t.id}
+                className={`pointer-events-auto flex items-center gap-3 bg-white dark:bg-slate-900 border ${borderTone} text-slate-900 dark:text-white text-xs px-4 py-3 rounded-xl shadow-2xl transition-all`}
+              >
+                {t.type === 'success' && (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 dark:text-emerald-400 shrink-0" />
+                )}
+                {t.type === 'info' && (
+                  <Info className="w-4 h-4 text-sky-500 dark:text-sky-400 shrink-0" />
+                )}
+                {t.type === 'warning' && (
+                  <AlertTriangle className="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
+                )}
+                {t.type === 'error' && (
+                  <AlertCircle className="w-4 h-4 text-rose-500 dark:text-rose-400 shrink-0" />
+                )}
 
-          {toast.undoAction && (
-            <button
-              type="button"
-              onClick={toast.undoAction}
-              className="ml-2 px-2 py-0.5 font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 bg-emerald-50 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-800 rounded transition-colors"
-            >
-              Undo
-            </button>
-          )}
+                <span className="font-medium leading-snug">{t.message}</span>
 
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            className="text-slate-400 hover:text-slate-700 dark:hover:text-white ml-1"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+                {t.undoAction && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      t.undoAction?.();
+                      dismissToast(t.id);
+                    }}
+                    className="ml-auto px-2 py-0.5 font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 bg-emerald-50 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-800 rounded transition-colors shrink-0"
+                  >
+                    Undo
+                  </button>
+                )}
+
+                {t.onAction && t.actionLabel && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      t.onAction?.();
+                      dismissToast(t.id);
+                    }}
+                    className="ml-auto px-2 py-0.5 font-semibold text-slate-700 dark:text-slate-200 hover:text-slate-950 dark:hover:text-white bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded transition-colors shrink-0"
+                  >
+                    {t.actionLabel}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => dismissToast(t.id)}
+                  aria-label="Dismiss notification"
+                  className="text-slate-400 hover:text-slate-700 dark:hover:text-white ml-1 shrink-0"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
