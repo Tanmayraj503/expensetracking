@@ -18,6 +18,10 @@ import {
   Tag,
   Info,
   Layers,
+  Loader2,
+  RefreshCw,
+  CheckCircle2,
+  Sliders,
 } from 'lucide-react';
 import { BudgetSettings, ExpenseCategory, SavingsGoal, Expense } from '../types';
 import { CATEGORIES, CATEGORY_COLORS } from '../data/sampleExpenses';
@@ -28,8 +32,32 @@ interface BudgetModalProps {
   onClose: () => void;
   budgetSettings: BudgetSettings;
   onSaveSettings: (newSettings: BudgetSettings) => void;
-  initialTab?: 'budget' | 'goals';
+  initialTab?: 'budget' | 'goals' | 'assistant';
   expenses?: Expense[];
+}
+
+type OptimizationStrategy = 'balanced' | 'aggressive-savings' | 'realistic-baseline';
+
+interface AiCategorySuggestion {
+  category: ExpenseCategory;
+  historicalMonthlyAvg: number;
+  latestMonthSpend: number;
+  currentCap: number | null;
+  suggestedCap: number;
+  monthlySavingsDelta: number;
+  priority: 'essential' | 'optimize' | 'cutback' | 'maintain';
+  rationale: string;
+}
+
+interface AiBudgetPlan {
+  summary: string;
+  recommendedMonthlyBudget: number;
+  projectedMonthlySavings: number;
+  goalAlignmentNote: string;
+  keyInsights: string[];
+  categorySuggestions: AiCategorySuggestion[];
+  analyzedMonthsCount: number;
+  analyzedTransactionsCount: number;
 }
 
 const SUPPORTED_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'INR', 'CAD', 'AUD'];
@@ -42,7 +70,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
   initialTab = 'budget',
   expenses = [],
 }) => {
-  const [activeTab, setActiveTab] = useState<'budget' | 'goals'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'budget' | 'goals' | 'assistant'>(initialTab);
   const [monthlyBudget, setMonthlyBudget] = useState(budgetSettings.monthlyBudget.toString());
   const [currency, setCurrency] = useState(budgetSettings.currency);
   const [autoDailyTarget, setAutoDailyTarget] = useState(budgetSettings.autoDailyTarget);
@@ -77,6 +105,23 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
   const [goalNotes, setGoalNotes] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
+
+  // AI Budget Coach state
+  const [aiStrategy, setAiStrategy] = useState<OptimizationStrategy>('balanced');
+  const [aiCustomFocus, setAiCustomFocus] = useState<string>('');
+  const [aiPlan, setAiPlan] = useState<AiBudgetPlan | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [selectedAiCategories, setSelectedAiCategories] = useState<Record<string, boolean>>({});
+  const [applyRecommendedOverall, setApplyRecommendedOverall] = useState<boolean>(true);
+  const [aiAppliedNotice, setAiAppliedNotice] = useState<string | null>(null);
+
+  const distinctMonthsCount = React.useMemo(() => {
+    const months = new Set(
+      expenses.map((e) => (e.date ? e.date.slice(0, 7) : '')).filter((ym) => ym.length === 7)
+    );
+    return months.size;
+  }, [expenses]);
 
   // Extract unique tags present across transactions and suggested goal tags
   const suggestedTags = React.useMemo(() => {
@@ -121,6 +166,8 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
       setIsTagUserEdited(false);
       setExpandedGoalId(null);
       setFormError(null);
+      setAiError(null);
+      setAiAppliedNotice(null);
 
       const initial: Partial<Record<ExpenseCategory, string>> = {};
       CATEGORIES.forEach((cat) => {
@@ -278,10 +325,133 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
     onClose();
   };
 
+  const handleRunAiAnalysis = async (overrideStrategy?: OptimizationStrategy) => {
+    setIsAiLoading(true);
+    setAiError(null);
+    setAiAppliedNotice(null);
+
+    const draftCatBudgets: Partial<Record<ExpenseCategory, number>> = {};
+    CATEGORIES.forEach((cat) => {
+      const raw = categoryBudgets[cat];
+      if (raw && !isNaN(parseFloat(raw))) {
+        draftCatBudgets[cat] = Math.max(0, parseFloat(raw));
+      }
+    });
+
+    // Include live goal savings progress so AI knows real-time goal cushion
+    const enrichedGoals = savingsGoals.map((g) => {
+      const progress = calculateGoalSavings(g, expenses);
+      return {
+        ...g,
+        currentAmount: progress.totalAmount,
+      };
+    });
+
+    try {
+      const res = await fetch('/api/budget-assistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expenses,
+          budgetSettings: {
+            monthlyBudget: numericMonthlyBudget || budgetSettings.monthlyBudget,
+            dailyTarget: autoDailyTarget ? computedAutoDaily : parseFloat(customDailyTarget) || budgetSettings.dailyTarget,
+            autoDailyTarget,
+            currency,
+            categoryBudgets: draftCatBudgets,
+            savingsGoals: enrichedGoals,
+          },
+          strategy: overrideStrategy || aiStrategy,
+          customFocus: aiCustomFocus.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Unable to generate AI budget recommendations.');
+      }
+
+      setAiPlan(data as AiBudgetPlan);
+      const initialSelection: Record<string, boolean> = {};
+      (data.categorySuggestions || []).forEach((s: AiCategorySuggestion) => {
+        initialSelection[s.category] = true;
+      });
+      setSelectedAiCategories(initialSelection);
+    } catch (err: any) {
+      setAiError(err?.message || 'Failed to reach AI Budgeting Assistant.');
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const handleApplySingleAiCap = (cat: ExpenseCategory, suggestedCap: number) => {
+    setCategoryBudgets((prev) => ({
+      ...prev,
+      [cat]: String(suggestedCap),
+    }));
+    setAiAppliedNotice(`Applied ${currencySymbol}${suggestedCap} cap to ${cat}. Review or save when ready.`);
+  };
+
+  const handleApplySelectedAiCaps = (saveImmediately: boolean = false) => {
+    if (!aiPlan) return;
+
+    const nextCategoryDraft = { ...categoryBudgets };
+    let appliedCount = 0;
+
+    aiPlan.categorySuggestions.forEach((item) => {
+      if (selectedAiCategories[item.category]) {
+        nextCategoryDraft[item.category] = String(item.suggestedCap);
+        appliedCount++;
+      }
+    });
+
+    const nextMonthlyStr =
+      applyRecommendedOverall && aiPlan.recommendedMonthlyBudget > 0
+        ? String(aiPlan.recommendedMonthlyBudget)
+        : monthlyBudget;
+
+    setCategoryBudgets(nextCategoryDraft);
+    if (applyRecommendedOverall && aiPlan.recommendedMonthlyBudget > 0) {
+      setMonthlyBudget(nextMonthlyStr);
+    }
+
+    if (saveImmediately) {
+      const finalMonthly = Math.max(0, parseFloat(nextMonthlyStr) || 0);
+      const finalDaily = autoDailyTarget
+        ? Math.round((finalMonthly / 31) * 100) / 100
+        : Math.max(0, parseFloat(customDailyTarget) || 0);
+
+      const parsedCatBudgets: Partial<Record<ExpenseCategory, number>> = {};
+      CATEGORIES.forEach((cat) => {
+        const raw = nextCategoryDraft[cat];
+        if (raw && !isNaN(parseFloat(raw))) {
+          parsedCatBudgets[cat] = Math.max(0, parseFloat(raw));
+        }
+      });
+
+      onSaveSettings({
+        monthlyBudget: finalMonthly,
+        dailyTarget: finalDaily,
+        autoDailyTarget,
+        currency,
+        categoryBudgets: parsedCatBudgets,
+        savingsGoals,
+      });
+      onClose();
+      return;
+    }
+
+    setAiAppliedNotice(
+      `Applied ${appliedCount} category ${appliedCount === 1 ? 'cap' : 'caps'}${
+        applyRecommendedOverall ? ` & ${currencySymbol}${aiPlan.recommendedMonthlyBudget} monthly limit` : ''
+      } to your draft settings.`
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 dark:bg-slate-950/80 backdrop-blur-xs transition-colors">
       <div
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors"
         role="dialog"
         aria-modal="true"
       >
@@ -292,7 +462,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
               Budget & Financial Goals
             </h3>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-              Configure spending targets, category limits, and long-term savings milestones
+              Configure spending targets, category limits, savings goals, and AI-optimized caps
             </p>
           </div>
           <button
@@ -305,14 +475,14 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
         </div>
 
         {/* Modal Tabs Navigation */}
-        <div className="flex border-b border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-950/40 px-6 pt-2">
+        <div className="flex border-b border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-950/40 px-4 sm:px-6 pt-2 overflow-x-auto">
           <button
             type="button"
             onClick={() => {
               setActiveTab('budget');
               setIsGoalFormOpen(false);
             }}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all ${
+            className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'budget'
                 ? 'border-emerald-500 text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-900 rounded-t-lg shadow-2xs'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
@@ -325,7 +495,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('goals')}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all ${
+            className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'goals'
                 ? 'border-emerald-500 text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-900 rounded-t-lg shadow-2xs'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
@@ -342,6 +512,22 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
             >
               {savingsGoals.length}
             </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('assistant');
+              setIsGoalFormOpen(false);
+            }}
+            className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'assistant'
+                ? 'border-emerald-500 text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-900 rounded-t-lg shadow-2xs'
+                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+            <span>AI Budget Coach</span>
           </button>
         </div>
 
@@ -448,7 +634,22 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Category Spending Caps (Optional)
                 </label>
-                <span className="text-[11px] text-slate-500">Monthly limits</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('assistant');
+                      if (!aiPlan && !isAiLoading) {
+                        handleRunAiAnalysis();
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Optimize with AI</span>
+                  </button>
+                  <span className="text-[11px] text-slate-500">Monthly limits</span>
+                </div>
               </div>
 
               <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
@@ -1066,6 +1267,374 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Tab 3: AI Budget Coach */}
+        {activeTab === 'assistant' && (
+          <div className="p-6 space-y-4 overflow-y-auto">
+            {/* Strategy & Context Header */}
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      AI Category Cap & Goal Optimizer
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Audits {expenses.length} historical transactions across {distinctMonthsCount || 1}{' '}
+                      {distinctMonthsCount === 1 ? 'month' : 'months'} &bull; {savingsGoals.length} active{' '}
+                      {savingsGoals.length === 1 ? 'goal' : 'goals'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRunAiAnalysis()}
+                  disabled={isAiLoading}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg transition-colors shadow-xs flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  {isAiLoading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Analyzing History...</span>
+                    </>
+                  ) : aiPlan ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Re-analyze Caps</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Analyze & Suggest Caps</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Optimization Strategy Pills */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {(
+                  [
+                    {
+                      id: 'balanced',
+                      label: 'Balanced Optimization',
+                      desc: 'Realistic trims (8–15%) on discretionary spend',
+                    },
+                    {
+                      id: 'aggressive-savings',
+                      label: 'Accelerate Goals',
+                      desc: 'Maximize monthly surplus toward savings goals',
+                    },
+                    {
+                      id: 'realistic-baseline',
+                      label: 'Realistic Baseline',
+                      desc: 'Align caps tightly to historical run-rates',
+                    },
+                  ] as const
+                ).map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => setAiStrategy(mode.id)}
+                    className={`p-2.5 rounded-lg border text-left transition-colors ${
+                      aiStrategy === mode.id
+                        ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/30'
+                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700'
+                    }`}
+                  >
+                    <div
+                      className={`text-[11px] font-bold ${
+                        aiStrategy === mode.id
+                          ? 'text-emerald-800 dark:text-emerald-300'
+                          : 'text-slate-800 dark:text-slate-200'
+                      }`}
+                    >
+                      {mode.label}
+                    </div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-tight">
+                      {mode.desc}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Optional Custom Focus Prompt */}
+              <div>
+                <input
+                  type="text"
+                  value={aiCustomFocus}
+                  onChange={(e) => setAiCustomFocus(e.target.value)}
+                  placeholder="Optional focus (e.g. Prioritize Emergency Fund, keep Groceries at $600, trim Dining)"
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            {/* Error State */}
+            {aiError && (
+              <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold">AI Assistant Unavailable</div>
+                  <p className="mt-0.5 leading-relaxed">{aiError}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Applied Confirmation Notice */}
+            {aiAppliedNotice && (
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>{aiAppliedNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('budget')}
+                  className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline shrink-0 flex items-center gap-0.5"
+                >
+                  <span>Review Caps</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+
+            {/* Empty / Initial Prompt State */}
+            {!aiPlan && !isAiLoading && !aiError && (
+              <div className="p-7 text-center bg-slate-50/70 dark:bg-slate-950/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 space-y-2">
+                <Sliders className="w-7 h-7 text-emerald-500 mx-auto opacity-80" />
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                  Ready to optimize your monthly category limits
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+                  Click <strong>Analyze &amp; Suggest Caps</strong> to inspect your historical category averages, recurring obligations, and active savings goals for tailored monthly limits.
+                </p>
+              </div>
+            )}
+
+            {/* Loading Skeleton */}
+            {isAiLoading && (
+              <div className="p-8 text-center bg-slate-50/70 dark:bg-slate-950/40 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                <Loader2 className="w-6 h-6 text-emerald-500 animate-spin mx-auto" />
+                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  Evaluating multi-month spending velocity &amp; goal timelines...
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Calibrating realistic category caps in {currency}
+                </p>
+              </div>
+            )}
+
+            {/* AI Plan Output */}
+            {aiPlan && !isAiLoading && (
+              <div className="space-y-4">
+                {/* Summary KPI & Rationale Card */}
+                <div className="p-4 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-500/25 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-500 block">Suggested Monthly Cap</span>
+                      <span className="text-base font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {formatCurrency(aiPlan.recommendedMonthlyBudget, currency)}
+                      </span>
+                      <span className="text-[10px] text-slate-400 block">
+                        Current: {formatCurrency(numericMonthlyBudget, currency)}
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-500 block">Est. Monthly Surplus</span>
+                      <span className="text-base font-bold font-mono tabular-nums text-indigo-600 dark:text-indigo-400">
+                        {aiPlan.projectedMonthlySavings > 0 ? '+' : ''}
+                        {formatCurrency(aiPlan.projectedMonthlySavings, currency)}
+                      </span>
+                      <span className="text-[10px] text-slate-400 block">Toward financial goals</span>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-500 block">Categories Tuned</span>
+                      <span className="text-base font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                        {aiPlan.categorySuggestions.length}
+                      </span>
+                      <span className="text-[10px] text-slate-400 block">
+                        From {aiPlan.analyzedTransactionsCount} transactions
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                    {aiPlan.summary}
+                  </p>
+
+                  {aiPlan.goalAlignmentNote && (
+                    <div className="p-2.5 rounded-lg bg-white/80 dark:bg-slate-900/70 border border-emerald-500/20 text-[11px] text-slate-700 dark:text-slate-300 flex items-start gap-2">
+                      <Target className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                      <span>{aiPlan.goalAlignmentNote}</span>
+                    </div>
+                  )}
+
+                  {aiPlan.keyInsights.length > 0 && (
+                    <ul className="space-y-1 text-[11px] text-slate-600 dark:text-slate-400 pl-1">
+                      {aiPlan.keyInsights.map((ins, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
+                          <span>{ins}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Category-by-Category Suggested Caps */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-900 dark:text-white">
+                      Recommended Category Monthly Caps
+                    </span>
+                    <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={applyRecommendedOverall}
+                        onChange={(e) => setApplyRecommendedOverall(e.target.checked)}
+                        className="rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>
+                        Also update overall monthly budget ({formatCurrency(aiPlan.recommendedMonthlyBudget, currency)})
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {aiPlan.categorySuggestions.map((item) => {
+                      const isChecked = !!selectedAiCategories[item.category];
+                      const currentDraftVal = parseFloat(categoryBudgets[item.category] || '');
+                      const isAlreadyApplied = !isNaN(currentDraftVal) && currentDraftVal === item.suggestedCap;
+                      const catColor = CATEGORY_COLORS[item.category]?.bar || '#10b981';
+
+                      const priorityBadge =
+                        item.priority === 'essential'
+                          ? 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300'
+                          : item.priority === 'cutback'
+                          ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+                          : item.priority === 'optimize'
+                          ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
+                          : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300';
+
+                      return (
+                        <div
+                          key={item.category}
+                          className={`p-3 rounded-xl border transition-colors ${
+                            isChecked
+                              ? 'bg-slate-50 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800'
+                              : 'bg-slate-50/40 dark:bg-slate-950/20 border-slate-200/50 dark:border-slate-800/40 opacity-65'
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) =>
+                                  setSelectedAiCategories((prev) => ({
+                                    ...prev,
+                                    [item.category]: e.target.checked,
+                                  }))
+                                }
+                                className="rounded text-emerald-600 focus:ring-emerald-500"
+                              />
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: catColor }}
+                              />
+                              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                                {item.category}
+                              </span>
+                              <span
+                                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded capitalize ${priorityBadge}`}
+                              >
+                                {item.priority}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-3 text-[11px] font-mono tabular-nums">
+                              <div className="text-slate-500">
+                                Avg:{' '}
+                                <span className="text-slate-700 dark:text-slate-300 font-semibold">
+                                  {formatCurrency(item.historicalMonthlyAvg, currency)}
+                                </span>
+                              </div>
+                              <div className="text-slate-500">
+                                Cap:{' '}
+                                <span className="text-slate-700 dark:text-slate-300">
+                                  {item.currentCap !== null
+                                    ? formatCurrency(item.currentCap, currency)
+                                    : 'None'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <ArrowRight className="w-3 h-3 text-slate-400" />
+                                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-500/30">
+                                  {formatCurrency(item.suggestedCap, currency)}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleApplySingleAiCap(item.category, item.suggestedCap)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-sans font-semibold border transition-colors ${
+                                  isAlreadyApplied
+                                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-emerald-500'
+                                }`}
+                              >
+                                {isAlreadyApplied ? 'Applied' : 'Apply'}
+                              </button>
+                            </div>
+                          </div>
+
+                          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1.5 pl-6 leading-snug">
+                            {item.rationale}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Bottom Action Bar */}
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => handleApplySelectedAiCaps(false)}
+                      className="px-3.5 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 rounded-lg transition-colors"
+                    >
+                      Apply to Draft
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleApplySelectedAiCaps(true)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <span>Apply &amp; Save All</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -263,6 +263,314 @@ Return strictly structured JSON.
   }
 });
 
+// AI Budgeting Assistant Endpoint (Category Caps + Goal Alignment)
+app.post('/api/budget-assistant', async (req, res) => {
+  try {
+    if (!apiKey) {
+      return res.status(503).json({
+        error:
+          'Gemini API key is not configured. Please check or set your API key in Settings > Secrets.',
+      });
+    }
+
+    const { expenses, budgetSettings, strategy = 'balanced', customFocus = '' } = req.body;
+
+    if (!expenses || !Array.isArray(expenses)) {
+      return res.status(400).json({ error: 'Invalid or missing expenses payload' });
+    }
+
+    const VALID_CATEGORIES = [
+      'Housing',
+      'Groceries',
+      'Dining & Drinks',
+      'Transportation',
+      'Utilities',
+      'Shopping',
+      'Entertainment',
+      'Health & Fitness',
+      'Travel',
+      'Subscriptions',
+      'Miscellaneous',
+    ] as const;
+
+    const currency = budgetSettings?.currency || 'USD';
+    const monthlyBudget = Number(budgetSettings?.monthlyBudget) || 3800;
+    const categoryBudgets: Record<string, number> = budgetSettings?.categoryBudgets || {};
+    const savingsGoals: any[] = Array.isArray(budgetSettings?.savingsGoals)
+      ? budgetSettings.savingsGoals
+      : [];
+
+    // Aggregate historical spending across distinct months
+    const distinctMonths = Array.from(
+      new Set(
+        expenses
+          .map((e: any) => (typeof e?.date === 'string' ? e.date.slice(0, 7) : ''))
+          .filter((ym: string) => ym.length === 7)
+      )
+    ).sort();
+
+    const monthCount = Math.max(1, distinctMonths.length);
+    const latestMonth = distinctMonths[distinctMonths.length - 1] || '';
+
+    const catStats: Record<
+      string,
+      {
+        totalAllTime: number;
+        latestMonthSpend: number;
+        txCount: number;
+        recurringCount: number;
+        merchants: Record<string, number>;
+        monthlyMap: Record<string, number>;
+      }
+    > = {};
+
+    VALID_CATEGORIES.forEach((c) => {
+      catStats[c] = {
+        totalAllTime: 0,
+        latestMonthSpend: 0,
+        txCount: 0,
+        recurringCount: 0,
+        merchants: {},
+        monthlyMap: {},
+      };
+    });
+
+    for (const e of expenses) {
+      const cat = VALID_CATEGORIES.includes(e.category) ? e.category : 'Miscellaneous';
+      const amt = Number(e.amount) || 0;
+      const ym = typeof e.date === 'string' ? e.date.slice(0, 7) : '';
+
+      catStats[cat].totalAllTime += amt;
+      catStats[cat].txCount += 1;
+      if (e.isRecurring) catStats[cat].recurringCount += 1;
+      if (ym && ym === latestMonth) {
+        catStats[cat].latestMonthSpend += amt;
+      }
+      if (ym) {
+        catStats[cat].monthlyMap[ym] = (catStats[cat].monthlyMap[ym] || 0) + amt;
+      }
+      if (e.merchant) {
+        catStats[cat].merchants[e.merchant] =
+          (catStats[cat].merchants[e.merchant] || 0) + amt;
+      }
+    }
+
+    const totalAllTimeSpend = Object.values(catStats).reduce((s, c) => s + c.totalAllTime, 0);
+    const historicalOverallMonthlyAvg = totalAllTimeSpend / monthCount;
+
+    const categoryContextLines = VALID_CATEGORIES.map((cat) => {
+      const st = catStats[cat];
+      const activeMonthsForCat = Math.max(1, Object.keys(st.monthlyMap).length);
+      const histAvgAllMonths = st.totalAllTime / monthCount;
+      const activeMonthAvg = st.totalAllTime > 0 ? st.totalAllTime / activeMonthsForCat : 0;
+      const peakMonth = Math.max(0, ...Object.values(st.monthlyMap));
+      const topMerchants = Object.entries(st.merchants)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([m, a]) => `${m} (${currency} ${a.toFixed(0)})`)
+        .join(', ');
+      const cap = categoryBudgets[cat];
+      return `- ${cat}: all-month avg=${currency} ${histAvgAllMonths.toFixed(2)}/mo, active-month avg=${currency} ${activeMonthAvg.toFixed(2)}/mo, latest month (${latestMonth || 'N/A'})=${currency} ${st.latestMonthSpend.toFixed(2)}, peak=${currency} ${peakMonth.toFixed(2)}, txs=${st.txCount} (${st.recurringCount} recurring), currentCap=${cap !== undefined ? `${currency} ${cap}` : 'None'}${topMerchants ? `, topMerchants=[${topMerchants}]` : ''}`;
+    }).join('\n');
+
+    const goalContextLines =
+      savingsGoals.length > 0
+        ? savingsGoals
+            .map((g: any) => {
+              const target = Number(g.targetAmount) || 0;
+              const current = Number(g.currentAmount) || 0;
+              const remaining = Math.max(0, target - current);
+              return `- "${g.name}" (category: ${g.category}, tag: #${g.tag || g.name}): target=${currency} ${target.toFixed(2)}, savedBase=${currency} ${current.toFixed(2)}, remaining=${currency} ${remaining.toFixed(2)}, targetDate=${g.targetDate || 'No fixed deadline'}${g.notes ? `, notes="${g.notes}"` : ''}`;
+            })
+            .join('\n')
+        : '- No explicit savings goals configured yet; prioritize building a healthy emergency reserve cushion.';
+
+    const strategyInstructions: Record<string, string> = {
+      balanced:
+        'Balanced Optimization: keep essential/fixed categories realistic based on history, and gently trim 8-15% from variable discretionary categories to create steady goal surplus.',
+      'aggressive-savings':
+        'Accelerate Goals: prioritize maximum realistic surplus by trimming 15-25% from non-essential discretionary categories while keeping housing, utilities, and baseline groceries intact.',
+      'realistic-baseline':
+        'Realistic Baseline: align caps closely with actual historical run-rates so caps are achievable without severe lifestyle shocks, tightening only clear outlier categories.',
+    };
+
+    const prompt = `
+You are an expert personal budgeting strategist inside LedgerPulse.
+Analyze the user's historical expense logs and savings goals to propose realistic, optimized monthly category spending caps.
+
+CONFIGURATION & GOALS:
+- Currency: ${currency}
+- Current Monthly Budget Ceiling: ${currency} ${monthlyBudget.toFixed(2)}
+- Historical Window: ${monthCount} distinct month(s) (${distinctMonths.join(', ') || 'No history'})
+- Historical Monthly Average Spend: ${currency} ${historicalOverallMonthlyAvg.toFixed(2)}/mo
+- Optimization Mode: ${strategyInstructions[strategy] || strategyInstructions.balanced}
+${customFocus ? `- User Custom Focus Instruction: "${String(customFocus).slice(0, 300)}"` : ''}
+
+FINANCIAL GOALS:
+${goalContextLines}
+
+HISTORICAL CATEGORY SPENDING BREAKDOWN:
+${categoryContextLines}
+
+INSTRUCTIONS:
+1. Return an optimized suggested monthly cap (numeric value in ${currency}) for all relevant categories from this exact list: ${VALID_CATEGORIES.join(', ')}. Include every category that has historical spend, an existing cap, or relates to a savings goal (and optionally key baseline categories so the plan sums coherently).
+2. Keep essential/recurring categories (like Housing, Utilities, Subscriptions) realistic relative to actual recurring obligations so recommendations feel trustworthy and achievable.
+3. Identify realistic trim opportunities in high-variance discretionary categories (like Dining & Drinks, Shopping, Entertainment, Travel) to fund the user's financial goals.
+4. Keep "summary" concise (2-3 sentences), "goalAlignmentNote" concise (1-2 sentences), "keyInsights" to 3 punchy bullet points, and each category "rationale" to 1 specific sentence referencing their actual spending habits/merchants or goals.
+5. Ensure recommendedMonthlyBudget aligns coherently with the sum of suggested category caps and the user's goal savings target.
+`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: prompt,
+      config: {
+        systemInstruction:
+          'You are a pragmatic certified financial planner. Output strict, well-calibrated JSON matching the responseSchema. Never invent non-existent category names.',
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            summary: {
+              type: Type.STRING,
+              description: '2-3 sentence executive summary of the historical audit and optimization plan.',
+            },
+            recommendedMonthlyBudget: {
+              type: Type.NUMBER,
+              description: 'Recommended overall monthly spending limit in user currency.',
+            },
+            projectedMonthlySavings: {
+              type: Type.NUMBER,
+              description: 'Estimated monthly cash freed up compared to recent/historical spending pace.',
+            },
+            goalAlignmentNote: {
+              type: Type.STRING,
+              description: 'How these optimized category caps accelerate or protect the user financial goals.',
+            },
+            keyInsights: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: '3 concise data-backed observations from the user historical expenses.',
+            },
+            categorySuggestions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  category: {
+                    type: Type.STRING,
+                    description: `Must be one of: ${VALID_CATEGORIES.join(', ')}`,
+                  },
+                  suggestedCap: {
+                    type: Type.NUMBER,
+                    description: 'Optimized realistic monthly budget cap for this category.',
+                  },
+                  priority: {
+                    type: Type.STRING,
+                    description: 'One of: essential, optimize, cutback, maintain',
+                  },
+                  rationale: {
+                    type: Type.STRING,
+                    description: 'Specific 1-sentence reason referencing spending habits or goals.',
+                  },
+                },
+                required: ['category', 'suggestedCap', 'priority', 'rationale'],
+              },
+            },
+          },
+          required: [
+            'summary',
+            'recommendedMonthlyBudget',
+            'projectedMonthlySavings',
+            'goalAlignmentNote',
+            'keyInsights',
+            'categorySuggestions',
+          ],
+        },
+      },
+    });
+
+    const rawText = (response.text ?? '{}').trim();
+    const parsed = JSON.parse(rawText);
+
+    // Hydrate exact server-computed historical averages & current caps for numeric accuracy
+    const seenCategories = new Set<string>();
+    const normalizedSuggestions = (Array.isArray(parsed.categorySuggestions)
+      ? parsed.categorySuggestions
+      : []
+    )
+      .filter((item: any) => VALID_CATEGORIES.includes(item?.category) && !seenCategories.has(item.category))
+      .map((item: any) => {
+        seenCategories.add(item.category);
+        const st = catStats[item.category];
+        const histAvg = st ? Math.round((st.totalAllTime / monthCount) * 100) / 100 : 0;
+        const latestSpend = st ? Math.round(st.latestMonthSpend * 100) / 100 : 0;
+        const currentCap =
+          categoryBudgets[item.category] !== undefined ? Number(categoryBudgets[item.category]) : null;
+        const suggestedCap = Math.max(0, Math.round(Number(item.suggestedCap) || 0));
+        const baseline = latestSpend > 0 ? latestSpend : histAvg;
+        const monthlySavingsDelta = Math.round((baseline - suggestedCap) * 100) / 100;
+        const validPriorities = ['essential', 'optimize', 'cutback', 'maintain'];
+        const priority = validPriorities.includes(item.priority) ? item.priority : 'optimize';
+
+        return {
+          category: item.category,
+          historicalMonthlyAvg: histAvg,
+          latestMonthSpend: latestSpend,
+          currentCap,
+          suggestedCap,
+          monthlySavingsDelta,
+          priority,
+          rationale: String(item.rationale || ''),
+        };
+      });
+
+    res.json({
+      summary: String(parsed.summary || ''),
+      recommendedMonthlyBudget: Math.max(
+        0,
+        Math.round(Number(parsed.recommendedMonthlyBudget) || monthlyBudget)
+      ),
+      projectedMonthlySavings: Math.round(Number(parsed.projectedMonthlySavings) || 0),
+      goalAlignmentNote: String(parsed.goalAlignmentNote || ''),
+      keyInsights: Array.isArray(parsed.keyInsights)
+        ? parsed.keyInsights.map((s: any) => String(s)).slice(0, 5)
+        : [],
+      categorySuggestions: normalizedSuggestions,
+      analyzedMonthsCount: monthCount,
+      analyzedTransactionsCount: expenses.length,
+    });
+  } catch (error: any) {
+    console.error('Error in /api/budget-assistant:', error);
+    const status = Number(error?.status) || 500;
+    const rawMsg = error?.message || String(error);
+
+    if (
+      status === 400 ||
+      status === 403 ||
+      rawMsg.includes('API_KEY_INVALID') ||
+      rawMsg.includes('PERMISSION_DENIED')
+    ) {
+      return res.status(status).json({
+        error:
+          'Unable to authenticate with Gemini API. Please verify your API key in Settings > Secrets.',
+        details: rawMsg,
+      });
+    }
+
+    if (status === 429 || rawMsg.includes('RESOURCE_EXHAUSTED')) {
+      return res.status(429).json({
+        error: 'Gemini API rate limit or quota reached. Please wait a moment and try again.',
+        details: rawMsg,
+      });
+    }
+
+    res.status(500).json({
+      error: 'Failed to generate AI budget recommendations.',
+      details: rawMsg,
+    });
+  }
+});
+
 // Vite dev middleware or production static serving
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
