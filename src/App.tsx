@@ -709,6 +709,7 @@ export default function App() {
         budgetSettings={budgetSettings}
         recentMerchants={recentMerchants}
         availableTags={availableTags}
+        expenses={expenses}
       />
 
       {/* Budget & Target Modal */}

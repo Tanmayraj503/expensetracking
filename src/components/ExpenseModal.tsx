@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   X,
   Check,
@@ -35,6 +35,7 @@ import {
   compressImageFileToBase64,
   generateReceiptBase64,
 } from '../utils/receiptGenerator';
+import { trainExpenseTagModel, predictExpenseTags } from '../utils/autoTagger';
 
 interface ExpenseModalProps {
   isOpen: boolean;
@@ -45,9 +46,10 @@ interface ExpenseModalProps {
   budgetSettings: BudgetSettings;
   recentMerchants?: string[];
   availableTags?: string[];
+  expenses?: Expense[];
 }
 
-const COMMON_TAG_SUGGESTIONS = ['Personal', 'Work', 'Project X', 'Essential', 'Travel', 'Tax'];
+const COMMON_TAG_SUGGESTIONS = ['Personal', 'Work', 'urgent', 'business', 'travel', 'Essential'];
 
 interface SampleReceipt {
   id: string;
@@ -102,6 +104,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   budgetSettings,
   recentMerchants = [],
   availableTags = [],
+  expenses = [],
 }) => {
   const [amount, setAmount] = useState('');
   const [merchant, setMerchant] = useState('');
@@ -148,6 +151,19 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   const suggestedTags = Array.from(
     new Set([...COMMON_TAG_SUGGESTIONS, ...availableTags])
   );
+
+  // Train ML Auto-Tagger on historical labeled expenses
+  const tagModel = useMemo(() => trainExpenseTagModel(expenses), [expenses]);
+
+  // Real-time ML tag predictions from merchant name, amount, and category
+  const mlTagPredictions = useMemo(() => {
+    return predictExpenseTags(tagModel, {
+      merchant,
+      amount,
+      category,
+      existingTags: tags,
+    });
+  }, [tagModel, merchant, amount, category, tags]);
 
   // Stop camera helper
   const stopCamera = () => {
@@ -494,10 +510,25 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   const handleAddTag = (tagToAdd?: string) => {
     const raw = tagToAdd || tagInput;
     const trimmed = raw.trim().replace(/^#/, '');
-    if (trimmed && !tags.includes(trimmed)) {
+    if (trimmed && !tags.some((t) => t.toLowerCase() === trimmed.toLowerCase())) {
       setTags([...tags, trimmed]);
       if (!tagToAdd) setTagInput('');
     }
+  };
+
+  const handleApplyAllMlTags = () => {
+    if (mlTagPredictions.length === 0) return;
+    setTags((prev) => {
+      const existingLower = new Set(prev.map((t) => t.toLowerCase()));
+      const next = [...prev];
+      mlTagPredictions.forEach((pred) => {
+        if (!existingLower.has(pred.tag.toLowerCase())) {
+          next.push(pred.tag);
+          existingLower.add(pred.tag.toLowerCase());
+        }
+      });
+      return next;
+    });
   };
 
   const handleRemoveTag = (tagToRemove: string) => {
@@ -1107,27 +1138,81 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                 </div>
               )}
 
+              {/* ML Auto-Tag Suggestions (Merchant + Amount Classifier) */}
+              {mlTagPredictions.length > 0 && (
+                <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-500/25 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span>Smart Tag Suggestions</span>
+                      <span className="text-[10px] font-normal text-emerald-700/75 dark:text-emerald-300/70 hidden sm:inline">
+                        based on merchant &amp; amount
+                      </span>
+                    </div>
+                    {mlTagPredictions.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleApplyAllMlTags}
+                        className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline"
+                      >
+                        + Apply all ({mlTagPredictions.length})
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {mlTagPredictions.map((pred) => {
+                      const pct = Math.round(pred.confidence * 100);
+                      return (
+                        <button
+                          key={pred.tag}
+                          type="button"
+                          onClick={() => handleAddTag(pred.tag)}
+                          title={`${pred.reason} (${pct}% confidence)`}
+                          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-emerald-300/80 dark:border-emerald-700/70 hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors shadow-2xs"
+                        >
+                          <span className="font-semibold">+{pred.tag}</span>
+                          <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400">
+                            {pct}%
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Quick Tag Suggestions */}
               <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                <span className="text-[11px] text-slate-500">Suggestions:</span>
-                {suggestedTags.slice(0, 5).map((s) => {
-                  const isSelected = tags.includes(s);
-                  return (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => handleAddTag(s)}
-                      disabled={isSelected}
-                      className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${
-                        isSelected
-                          ? 'opacity-40 text-slate-400 dark:text-slate-500 cursor-default'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      +{s}
-                    </button>
-                  );
-                })}
+                <span className="text-[11px] text-slate-500">Quick tags:</span>
+                {suggestedTags
+                  .filter(
+                    (s) =>
+                      !mlTagPredictions.some(
+                        (p) => p.tag.toLowerCase() === s.toLowerCase()
+                      )
+                  )
+                  .slice(0, 5)
+                  .map((s) => {
+                    const isSelected = tags.some(
+                      (t) => t.toLowerCase() === s.toLowerCase()
+                    );
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => handleAddTag(s)}
+                        disabled={isSelected}
+                        className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${
+                          isSelected
+                            ? 'opacity-40 text-slate-400 dark:text-slate-500 cursor-default'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        +{s}
+                      </button>
+                    );
+                  })}
               </div>
             </div>
 
