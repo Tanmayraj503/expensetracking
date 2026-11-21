@@ -467,3 +467,61 @@ export function calculateGoalSavings(
     matchingExpenses,
   };
 }
+
+export interface GoalBudgetMetrics {
+  categoryCap: number | undefined;
+  categoryMonthSpend: number;
+  categoryRemaining: number | null;
+  monthsUntilTarget: number | null;
+  requiredMonthlyPace: number | null;
+  monthlyContribution: number;
+  linkedToBudget: boolean;
+  isOnPace: boolean;
+}
+
+export function calculateGoalBudgetMetrics(
+  goal: SavingsGoal,
+  expenses: Expense[],
+  categoryBudgets: Partial<Record<ExpenseCategory, number>>,
+  referenceYearMonth: string
+): GoalBudgetMetrics {
+  const savings = calculateGoalSavings(goal, expenses);
+  const categoryCap = categoryBudgets[goal.category];
+  const categoryMonthSpend = expenses
+    .filter((e) => e.date.startsWith(referenceYearMonth) && e.category === goal.category)
+    .reduce((sum, e) => sum + e.amount, 0);
+  const categoryRemaining =
+    categoryCap !== undefined ? Math.round((categoryCap - categoryMonthSpend) * 100) / 100 : null;
+
+  let monthsUntilTarget: number | null = null;
+  if (goal.targetDate && /^\d{4}-\d{2}/.test(goal.targetDate) && /^\d{4}-\d{2}$/.test(referenceYearMonth)) {
+    const [refY, refM] = referenceYearMonth.split('-').map(Number);
+    const [tgtY, tgtM] = goal.targetDate.slice(0, 7).split('-').map(Number);
+    const diff = (tgtY - refY) * 12 + (tgtM - refM);
+    monthsUntilTarget = Math.max(1, diff);
+  }
+
+  const requiredMonthlyPace =
+    monthsUntilTarget !== null && savings.remainingAmount > 0
+      ? Math.round((savings.remainingAmount / monthsUntilTarget) * 100) / 100
+      : null;
+
+  const monthlyContribution = Math.max(0, goal.monthlyContribution || 0);
+  const linkedToBudget = Boolean(goal.linkedToBudget ?? (monthlyContribution > 0 || categoryCap !== undefined));
+  const isOnPace =
+    savings.isCompleted ||
+    requiredMonthlyPace === null ||
+    monthlyContribution >= requiredMonthlyPace;
+
+  return {
+    categoryCap,
+    categoryMonthSpend,
+    categoryRemaining,
+    monthsUntilTarget,
+    requiredMonthlyPace,
+    monthlyContribution,
+    linkedToBudget,
+    isOnPace,
+  };
+}
+

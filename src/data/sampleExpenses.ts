@@ -64,6 +64,8 @@ export const DEFAULT_BUDGET_SETTINGS: BudgetSettings = {
       targetDate: '2027-06-30',
       notes: '6-month emergency reserve cushion',
       createdAt: '2026-01-15',
+      monthlyContribution: 250,
+      linkedToBudget: true,
     },
     {
       id: 'goal-vacation-travel',
@@ -75,6 +77,8 @@ export const DEFAULT_BUDGET_SETTINGS: BudgetSettings = {
       targetDate: '2027-07-15',
       notes: 'Flights, coastal lodging, and itinerary excursions',
       createdAt: '2026-03-10',
+      monthlyContribution: 150,
+      linkedToBudget: true,
     },
     {
       id: 'goal-tech-setup',
@@ -86,6 +90,8 @@ export const DEFAULT_BUDGET_SETTINGS: BudgetSettings = {
       targetDate: '2026-12-31',
       notes: 'Motorized standing desk and color-accurate 4K monitor',
       createdAt: '2026-05-20',
+      monthlyContribution: 100,
+      linkedToBudget: true,
     },
   ],
 };

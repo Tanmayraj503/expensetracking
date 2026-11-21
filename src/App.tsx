@@ -51,7 +51,7 @@ export default function App() {
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
-  const [budgetModalInitialTab, setBudgetModalInitialTab] = useState<'budget' | 'goals'>('budget');
+  const [budgetModalInitialTab, setBudgetModalInitialTab] = useState<'budget' | 'goals' | 'assistant'>('budget');
   const [addExpenseDefaultDate, setAddExpenseDefaultDate] = useState<string>('2026-10-29');
 
   // PDF Export Modal State
@@ -448,7 +448,7 @@ export default function App() {
     }
   };
 
-  const handleOpenBudgetModal = (tab: 'budget' | 'goals' = 'budget') => {
+  const handleOpenBudgetModal = (tab: 'budget' | 'goals' | 'assistant' = 'budget') => {
     setBudgetModalInitialTab(tab);
     setIsBudgetModalOpen(true);
   };
@@ -720,6 +720,7 @@ export default function App() {
         onSaveSettings={updateBudgetSettings}
         initialTab={budgetModalInitialTab}
         expenses={expenses}
+        selectedYearMonth={selectedYearMonth}
       />
 
       {/* Spending Statement PDF Export Modal */}

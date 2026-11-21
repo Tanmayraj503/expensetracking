@@ -22,10 +22,19 @@ import {
   RefreshCw,
   CheckCircle2,
   Sliders,
+  Link2,
+  Unlink,
 } from 'lucide-react';
 import { BudgetSettings, ExpenseCategory, SavingsGoal, Expense } from '../types';
 import { CATEGORIES, CATEGORY_COLORS } from '../data/sampleExpenses';
-import { CURRENCY_SYMBOLS, formatCurrency, calculateGoalSavings, matchExpenseToGoalTag } from '../utils/formatters';
+import {
+  CURRENCY_SYMBOLS,
+  formatCurrency,
+  formatMonthYear,
+  calculateGoalSavings,
+  calculateGoalBudgetMetrics,
+  matchExpenseToGoalTag,
+} from '../utils/formatters';
 
 interface BudgetModalProps {
   isOpen: boolean;
@@ -34,6 +43,7 @@ interface BudgetModalProps {
   onSaveSettings: (newSettings: BudgetSettings) => void;
   initialTab?: 'budget' | 'goals' | 'assistant';
   expenses?: Expense[];
+  selectedYearMonth?: string;
 }
 
 type OptimizationStrategy = 'balanced' | 'aggressive-savings' | 'realistic-baseline';
@@ -69,6 +79,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
   onSaveSettings,
   initialTab = 'budget',
   expenses = [],
+  selectedYearMonth = '2026-10',
 }) => {
   const [activeTab, setActiveTab] = useState<'budget' | 'goals' | 'assistant'>(initialTab);
   const [monthlyBudget, setMonthlyBudget] = useState(budgetSettings.monthlyBudget.toString());
@@ -103,8 +114,12 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
   const [goalCategory, setGoalCategory] = useState<ExpenseCategory>('Housing');
   const [goalTargetDate, setGoalTargetDate] = useState('');
   const [goalNotes, setGoalNotes] = useState('');
+  const [goalMonthlyContribution, setGoalMonthlyContribution] = useState('150');
+  const [goalLinkedToBudget, setGoalLinkedToBudget] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
   const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
+  const [editingInlineCapGoalId, setEditingInlineCapGoalId] = useState<string | null>(null);
+  const [inlineCapValue, setInlineCapValue] = useState('');
 
   // AI Budget Coach state
   const [aiStrategy, setAiStrategy] = useState<OptimizationStrategy>('balanced');
@@ -164,7 +179,11 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
       setEditingGoalId(null);
       setGoalTag('');
       setIsTagUserEdited(false);
+      setGoalMonthlyContribution('150');
+      setGoalLinkedToBudget(true);
       setExpandedGoalId(null);
+      setEditingInlineCapGoalId(null);
+      setInlineCapValue('');
       setFormError(null);
       setAiError(null);
       setAiAppliedNotice(null);
@@ -179,11 +198,69 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
     }
   }, [isOpen, initialTab, budgetSettings]);
 
+  const draftCategoryBudgetsNumeric = React.useMemo(() => {
+    const parsed: Partial<Record<ExpenseCategory, number>> = {};
+    CATEGORIES.forEach((cat) => {
+      const raw = categoryBudgets[cat];
+      if (raw && !isNaN(parseFloat(raw))) {
+        parsed[cat] = Math.max(0, parseFloat(raw));
+      }
+    });
+    return parsed;
+  }, [categoryBudgets]);
+
+  const monthExpenses = React.useMemo(
+    () => expenses.filter((e) => e.date.startsWith(selectedYearMonth)),
+    [expenses, selectedYearMonth]
+  );
+
+  const monthTotalSpent = React.useMemo(
+    () => monthExpenses.reduce((sum, e) => sum + e.amount, 0),
+    [monthExpenses]
+  );
+
+  const portfolioMetrics = React.useMemo(() => {
+    let totalSaved = 0;
+    let totalTarget = 0;
+    let totalLinkedMonthly = 0;
+    let linkedCount = 0;
+    let completedCount = 0;
+
+    savingsGoals.forEach((goal) => {
+      const sav = calculateGoalSavings(goal, expenses);
+      const bMetrics = calculateGoalBudgetMetrics(
+        goal,
+        expenses,
+        draftCategoryBudgetsNumeric,
+        selectedYearMonth
+      );
+      totalSaved += sav.totalAmount;
+      totalTarget += goal.targetAmount;
+      if (sav.isCompleted) completedCount += 1;
+      if (bMetrics.linkedToBudget) {
+        linkedCount += 1;
+        totalLinkedMonthly += bMetrics.monthlyContribution;
+      }
+    });
+
+    const pct = totalTarget > 0 ? Math.min(100, (totalSaved / totalTarget) * 100) : 0;
+    return {
+      totalSaved,
+      totalTarget,
+      totalLinkedMonthly,
+      linkedCount,
+      completedCount,
+      overallPercentage: pct,
+    };
+  }, [savingsGoals, expenses, draftCategoryBudgetsNumeric, selectedYearMonth]);
+
   if (!isOpen) return null;
 
   const currencySymbol = CURRENCY_SYMBOLS[currency] || '$';
   const numericMonthlyBudget = parseFloat(monthlyBudget) || 0;
   const computedAutoDaily = Math.round((numericMonthlyBudget / 31) * 100) / 100;
+  const netSpendableAfterGoals = Math.max(0, numericMonthlyBudget - portfolioMetrics.totalLinkedMonthly);
+  const monthBudgetHeadroom = Math.max(0, numericMonthlyBudget - monthTotalSpent);
 
   const handleCategoryBudgetChange = (cat: ExpenseCategory, val: string) => {
     setCategoryBudgets((prev) => ({
@@ -197,7 +274,8 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
     defaultTag = '',
     defaultTarget = '',
     defaultCat: ExpenseCategory = 'Travel',
-    defaultNotes = ''
+    defaultNotes = '',
+    defaultMonthly = '150'
   ) => {
     setEditingGoalId(null);
     setGoalName(defaultName);
@@ -208,6 +286,8 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
     setGoalCategory(defaultCat);
     setGoalTargetDate('');
     setGoalNotes(defaultNotes);
+    setGoalMonthlyContribution(defaultMonthly);
+    setGoalLinkedToBudget(true);
     setFormError(null);
     setIsGoalFormOpen(true);
   };
@@ -222,6 +302,10 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
     setGoalCategory(goal.category);
     setGoalTargetDate(goal.targetDate || '');
     setGoalNotes(goal.notes || '');
+    setGoalMonthlyContribution(
+      goal.monthlyContribution !== undefined ? goal.monthlyContribution.toString() : '150'
+    );
+    setGoalLinkedToBudget(goal.linkedToBudget !== false);
     setFormError(null);
     setIsGoalFormOpen(true);
   };
@@ -237,12 +321,41 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
     setSavingsGoals((prev) =>
       prev.map((g) => {
         if (g.id === goalId) {
-          const next = Math.max(0, g.currentAmount + delta);
+          const next = Math.max(0, Math.round((g.currentAmount + delta) * 100) / 100);
           return { ...g, currentAmount: next };
         }
         return g;
       })
     );
+  };
+
+  const handleToggleGoalBudgetLink = (goalId: string) => {
+    setSavingsGoals((prev) =>
+      prev.map((g) => {
+        if (g.id === goalId) {
+          const currentlyLinked = g.linkedToBudget !== false;
+          return {
+            ...g,
+            linkedToBudget: !currentlyLinked,
+          };
+        }
+        return g;
+      })
+    );
+  };
+
+  const handleSaveInlineCategoryCap = (cat: ExpenseCategory) => {
+    const trimmed = inlineCapValue.trim();
+    if (trimmed === '') {
+      handleCategoryBudgetChange(cat, '');
+    } else {
+      const num = parseFloat(trimmed);
+      if (!isNaN(num) && num >= 0) {
+        handleCategoryBudgetChange(cat, String(Math.round(num * 100) / 100));
+      }
+    }
+    setEditingInlineCapGoalId(null);
+    setInlineCapValue('');
   };
 
   const handleSaveGoalForm = (e: React.FormEvent) => {
@@ -257,6 +370,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
       return;
     }
     const current = Math.max(0, parseFloat(goalCurrentAmount) || 0);
+    const monthlyContrib = Math.max(0, parseFloat(goalMonthlyContribution) || 0);
     const chosenTag = (goalTag.trim() || goalName.trim()).replace(/^#/, '');
 
     if (editingGoalId) {
@@ -272,6 +386,8 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                 category: goalCategory,
                 targetDate: goalTargetDate || undefined,
                 notes: goalNotes.trim() || undefined,
+                monthlyContribution: monthlyContrib,
+                linkedToBudget: goalLinkedToBudget,
               }
             : g
         )
@@ -287,6 +403,8 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
         targetDate: goalTargetDate || undefined,
         notes: goalNotes.trim() || undefined,
         createdAt: new Date().toISOString().slice(0, 10),
+        monthlyContribution: monthlyContrib,
+        linkedToBudget: goalLinkedToBudget,
       };
       setSavingsGoals((prev) => [...prev, newGoal]);
     }
@@ -579,6 +697,30 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
               <p className="text-[11px] text-slate-500 mt-1">
                 Used to pace monthly spend and calculate burn-rate trajectory.
               </p>
+              {portfolioMetrics.linkedCount > 0 && portfolioMetrics.totalLinkedMonthly > 0 && (
+                <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-500/20 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                    <Link2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span>
+                      <strong className="font-mono tabular-nums text-emerald-700 dark:text-emerald-300">
+                        {formatCurrency(portfolioMetrics.totalLinkedMonthly, currency)}/mo
+                      </strong>{' '}
+                      reserved across {portfolioMetrics.linkedCount} linked{' '}
+                      {portfolioMetrics.linkedCount === 1 ? 'goal' : 'goals'} &middot; Net spendable:{' '}
+                      <strong className="font-mono tabular-nums text-slate-900 dark:text-white">
+                        {formatCurrency(netSpendableAfterGoals, currency)}
+                      </strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('goals')}
+                    className="font-semibold text-emerald-700 dark:text-emerald-400 hover:underline whitespace-nowrap shrink-0"
+                  >
+                    Manage goals &rarr;
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Daily Spend Target */}
@@ -653,26 +795,37 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
               </div>
 
               <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                {CATEGORIES.map((cat) => (
-                  <div
-                    key={cat}
-                    className="flex items-center justify-between gap-3 text-xs p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-950/40"
-                  >
-                    <span className="text-slate-700 dark:text-slate-300">{cat}</span>
-                    <div className="relative w-28 shrink-0">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 font-mono text-xs">
-                        {currencySymbol}
-                      </span>
-                      <input
-                        type="number"
-                        placeholder="No limit"
-                        value={categoryBudgets[cat] || ''}
-                        onChange={(e) => handleCategoryBudgetChange(cat, e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md pl-6 pr-2 py-1 text-xs font-mono tabular-nums text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
-                      />
+                {CATEGORIES.map((cat) => {
+                  const linkedGoalsForCat = savingsGoals.filter((g) => g.category === cat);
+                  return (
+                    <div
+                      key={cat}
+                      className="flex items-center justify-between gap-3 text-xs p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-950/40"
+                    >
+                      <div className="min-w-0 flex items-center gap-2">
+                        <span className="text-slate-700 dark:text-slate-300 truncate">{cat}</span>
+                        {linkedGoalsForCat.length > 0 && (
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 truncate">
+                            &middot; {linkedGoalsForCat.length}{' '}
+                            {linkedGoalsForCat.length === 1 ? 'goal' : 'goals'} linked
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative w-28 shrink-0">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 font-mono text-xs">
+                          {currencySymbol}
+                        </span>
+                        <input
+                          type="number"
+                          placeholder="No limit"
+                          value={categoryBudgets[cat] || ''}
+                          onChange={(e) => handleCategoryBudgetChange(cat, e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md pl-6 pr-2 py-1 text-xs font-mono tabular-nums text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                        />
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -698,24 +851,77 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
 
         {/* Tab 2: Savings Goals */}
         {activeTab === 'goals' && (
-          <div className="p-6 space-y-5 overflow-y-auto">
-            {/* Context Explainer Banner */}
-            <div className="bg-emerald-50/80 dark:bg-emerald-950/20 border border-emerald-500/20 rounded-xl p-3.5 flex items-start gap-3">
-              <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5">
-                <Target className="w-4 h-4" />
-              </div>
-              <div className="text-xs space-y-1">
-                <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                  <span>Tag-Driven Savings Targets</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 font-semibold">
-                    Auto-Tracked
+          <div className="p-6 space-y-4 overflow-y-auto">
+            {/* Portfolio & Budget Linkage Summary Bar */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                    Total Saved
+                  </span>
+                  <span className="text-sm sm:text-base font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+                    {formatCurrency(portfolioMetrics.totalSaved, currency)}
+                  </span>
+                  <span className="text-[10px] font-mono tabular-nums text-slate-500 block">
+                    of {formatCurrency(portfolioMetrics.totalTarget, currency)} target
                   </span>
                 </div>
-                <p className="text-slate-600 dark:text-slate-400 leading-relaxed text-[11px]">
-                  Set specific financial milestones (e.g. <strong>Emergency Fund</strong>, <strong>Vacation</strong>).
-                  Transactions tagged with matching labels (like <span className="font-mono text-emerald-700 dark:text-emerald-400 font-semibold">#Emergency Fund</span> or <span className="font-mono text-emerald-700 dark:text-emerald-400 font-semibold">#Vacation</span>) automatically advance the progress bars in real time, combined with any base allocations.
-                </p>
+
+                <div>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                    Linked Monthly Reserve
+                  </span>
+                  <span className="text-sm sm:text-base font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                    {formatCurrency(portfolioMetrics.totalLinkedMonthly, currency)}/mo
+                  </span>
+                  <span className="text-[10px] text-slate-500 block">
+                    {portfolioMetrics.linkedCount} of {savingsGoals.length} goals linked
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                    {formatMonthYear(selectedYearMonth)} Budget
+                  </span>
+                  <span className="text-sm sm:text-base font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                    {formatCurrency(monthBudgetHeadroom, currency)} left
+                  </span>
+                  <span className="text-[10px] font-mono tabular-nums text-slate-500 block">
+                    Spent {formatCurrency(monthTotalSpent, currency)} / {formatCurrency(numericMonthlyBudget, currency)}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                    Net Spendable Cap
+                  </span>
+                  <span className="text-sm sm:text-base font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                    {formatCurrency(netSpendableAfterGoals, currency)}
+                  </span>
+                  <span className="text-[10px] text-slate-500 block">
+                    After goal reserves · {portfolioMetrics.completedCount} met
+                  </span>
+                </div>
               </div>
+
+              {savingsGoals.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between text-[11px] font-mono tabular-nums mb-1">
+                    <span className="text-slate-500 dark:text-slate-400 font-sans">
+                      Combined Portfolio Progress
+                    </span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                      {portfolioMetrics.overallPercentage.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-emerald-500 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${Math.min(100, portfolioMetrics.overallPercentage)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Quick Starter Templates */}
@@ -730,10 +936,11 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                       'Emergency Fund',
                       '5000',
                       'Housing',
-                      '3-6 months essential buffer fund'
+                      '3-6 months essential buffer fund',
+                      '250'
                     )
                   }
-                  className="px-2.5 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 text-slate-700 dark:text-slate-300 transition-colors shrink-0 flex items-center gap-1 font-medium shadow-2xs"
+                  className="px-2.5 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 text-slate-700 dark:text-slate-300 transition-colors shrink-0 flex items-center gap-1 font-medium whitespace-nowrap"
                 >
                   <Plus className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                   <span>Emergency Fund ($5,000)</span>
@@ -746,10 +953,11 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                       'Vacation',
                       '3000',
                       'Travel',
-                      'Summer trip & travel savings'
+                      'Summer trip & travel savings',
+                      '150'
                     )
                   }
-                  className="px-2.5 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 text-slate-700 dark:text-slate-300 transition-colors shrink-0 flex items-center gap-1 font-medium shadow-2xs"
+                  className="px-2.5 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 text-slate-700 dark:text-slate-300 transition-colors shrink-0 flex items-center gap-1 font-medium whitespace-nowrap"
                 >
                   <Plus className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                   <span>Vacation ($3,000)</span>
@@ -762,10 +970,11 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                       'Tech Setup',
                       '1500',
                       'Shopping',
-                      'New ergonomic desk & hardware'
+                      'New ergonomic desk & hardware',
+                      '100'
                     )
                   }
-                  className="px-2.5 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 text-slate-700 dark:text-slate-300 transition-colors shrink-0 flex items-center gap-1 font-medium shadow-2xs"
+                  className="px-2.5 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 text-slate-700 dark:text-slate-300 transition-colors shrink-0 flex items-center gap-1 font-medium whitespace-nowrap"
                 >
                   <Plus className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                   <span>Tech Setup ($1,500)</span>
@@ -827,77 +1036,6 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                     />
                   </div>
 
-                  {/* Tracking Tag */}
-                  <div className="sm:col-span-2">
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                        Tracking Tag *
-                      </label>
-                      <span className="text-[10px] text-slate-400">
-                        Links transactions with this tag to this goal
-                      </span>
-                    </div>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-600 dark:text-emerald-400 font-mono font-bold text-xs">
-                        #
-                      </span>
-                      <input
-                        type="text"
-                        placeholder="e.g. Emergency Fund, Vacation, Tech Setup"
-                        value={goalTag.replace(/^#/, '')}
-                        onChange={(e) => {
-                          setIsTagUserEdited(true);
-                          setGoalTag(e.target.value.replace(/^#/, ''));
-                        }}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg pl-7 pr-3 py-2 text-xs font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
-                      />
-                    </div>
-
-                    {/* Suggested Tag Chips */}
-                    {suggestedTags.length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap mt-2">
-                        <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
-                          <Tag className="w-2.5 h-2.5" /> Suggestions:
-                        </span>
-                        {suggestedTags.slice(0, 8).map((st) => (
-                          <button
-                            key={st}
-                            type="button"
-                            onClick={() => {
-                              setIsTagUserEdited(true);
-                              setGoalTag(st);
-                            }}
-                            className="px-2 py-0.5 text-[10px] font-mono rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors border border-transparent hover:border-emerald-400/30"
-                          >
-                            #{st}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Live Match Preview */}
-                    <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <div>
-                          <span className="font-semibold text-emerald-950 dark:text-emerald-200">
-                            {liveMatching.count > 0
-                              ? `${liveMatching.count} transaction${liveMatching.count === 1 ? '' : 's'} identified in ledger`
-                              : 'No ledger transactions currently match this tag'}
-                          </span>
-                          <span className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 block">
-                            {liveMatching.count > 0
-                              ? `Identified ${formatCurrency(liveMatching.total, currency)} in savings (e.g. "${liveMatching.sampleMerchant}")`
-                              : `Add #${goalTag.trim() || goalName.trim() || 'tag'} to any expense to track it automatically`}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">
-                        +{formatCurrency(liveMatching.total, currency)}
-                      </span>
-                    </div>
-                  </div>
-
                   {/* Target Amount */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -923,7 +1061,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                   {/* Base Saved Amount (Manual deposit / starting balance) */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Base / Starting Balance
+                      Starting / Saved Balance
                     </label>
                     <div className="relative">
                       <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs">
@@ -940,35 +1078,186 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                       />
                     </div>
                     <p className="text-[10px] text-slate-500 mt-1">
-                      Direct cash allocations, added to tagged transaction savings
+                      Combined automatically with tagged ledger savings
                     </p>
                   </div>
 
-                  {/* Associated Category */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Assigned Category
-                    </label>
-                    <select
-                      value={goalCategory}
-                      onChange={(e) => setGoalCategory(e.target.value as ExpenseCategory)}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
-                    >
-                      {CATEGORIES.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Links goal with monthly budget category tracking
-                    </p>
+                  {/* Link to Existing Budget Tracking */}
+                  <div className="sm:col-span-2 p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Link2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                          Link to Monthly Budget Tracking
+                        </span>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-600 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={goalLinkedToBudget}
+                          onChange={(e) => setGoalLinkedToBudget(e.target.checked)}
+                          className="rounded-xs border-slate-300 dark:border-slate-700 text-emerald-500 focus:ring-emerald-500"
+                        />
+                        <span>Reserve in budget</span>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Linked Budget Category
+                        </label>
+                        <select
+                          value={goalCategory}
+                          onChange={(e) => setGoalCategory(e.target.value as ExpenseCategory)}
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                        >
+                          {CATEGORIES.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </select>
+                        {(() => {
+                          const catCap = draftCategoryBudgetsNumeric[goalCategory];
+                          const catSpend = monthExpenses
+                            .filter((e) => e.category === goalCategory)
+                            .reduce((s, e) => s + e.amount, 0);
+                          return (
+                            <p className="text-[10px] text-slate-500 mt-1 font-mono tabular-nums">
+                              {catCap !== undefined
+                                ? `Cap: ${formatCurrency(catCap, currency)}/mo · Spent: ${formatCurrency(catSpend, currency)}`
+                                : `No monthly cap set · Spent: ${formatCurrency(catSpend, currency)}`}
+                            </p>
+                          );
+                        })()}
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                            Monthly Contribution Target
+                          </label>
+                          {(() => {
+                            const tgt = parseFloat(goalTargetAmount) || 0;
+                            const cur = parseFloat(goalCurrentAmount) || 0;
+                            const rem = Math.max(0, tgt - (cur + liveMatching.total));
+                            if (goalTargetDate && /^\d{4}-\d{2}/.test(goalTargetDate) && rem > 0) {
+                              const [refY, refM] = selectedYearMonth.split('-').map(Number);
+                              const [tY, tM] = goalTargetDate.slice(0, 7).split('-').map(Number);
+                              const months = Math.max(1, (tY - refY) * 12 + (tM - refM));
+                              const pace = Math.ceil(rem / months);
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setGoalMonthlyContribution(String(pace))}
+                                  className="text-[10px] font-mono font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
+                                >
+                                  Use pace ({currencySymbol}{pace}/mo)
+                                </button>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs">
+                            {currencySymbol}
+                          </span>
+                          <input
+                            type="number"
+                            step="5"
+                            min="0"
+                            placeholder="150"
+                            value={goalMonthlyContribution}
+                            onChange={(e) => setGoalMonthlyContribution(e.target.value)}
+                            disabled={!goalLinkedToBudget}
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg pl-7 pr-10 py-1.5 text-xs font-mono tabular-nums text-slate-900 dark:text-white disabled:opacity-50 focus:outline-none focus:border-emerald-500"
+                          />
+                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-mono">
+                            /mo
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          {goalLinkedToBudget
+                            ? 'Reserves this monthly amount against your overall budget'
+                            : 'Goal tracked independently of monthly budget cap'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tracking Tag */}
+                  <div className="sm:col-span-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Ledger Auto-Tracking Tag *
+                      </label>
+                      <span className="text-[10px] text-slate-400">
+                        Matches tagged transactions automatically
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-600 dark:text-emerald-400 font-mono font-bold text-xs">
+                        #
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="e.g. Emergency Fund, Vacation, Tech Setup"
+                        value={goalTag.replace(/^#/, '')}
+                        onChange={(e) => {
+                          setIsTagUserEdited(true);
+                          setGoalTag(e.target.value.replace(/^#/, ''));
+                        }}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg pl-7 pr-3 py-2 text-xs font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    {suggestedTags.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                        <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
+                          <Tag className="w-2.5 h-2.5" /> Suggestions:
+                        </span>
+                        {suggestedTags.slice(0, 8).map((st) => (
+                          <button
+                            key={st}
+                            type="button"
+                            onClick={() => {
+                              setIsTagUserEdited(true);
+                              setGoalTag(st);
+                            }}
+                            className="px-2 py-0.5 text-[10px] font-mono rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors"
+                          >
+                            #{st}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Live Match Preview */}
+                    <div className="mt-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs flex items-center justify-between">
+                      <div className="min-w-0 pr-2">
+                        <span className="font-semibold text-emerald-950 dark:text-emerald-200 block">
+                          {liveMatching.count > 0
+                            ? `${liveMatching.count} matching ledger ${liveMatching.count === 1 ? 'transaction' : 'transactions'}`
+                            : 'No matching ledger transactions yet'}
+                        </span>
+                        <span className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 block truncate">
+                          {liveMatching.count > 0
+                            ? `Auto-credited ${formatCurrency(liveMatching.total, currency)} (e.g. "${liveMatching.sampleMerchant}")`
+                            : `Tag expenses with #${goalTag.trim() || goalName.trim() || 'tag'} to auto-credit`}
+                        </span>
+                      </div>
+                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 tabular-nums shrink-0">
+                        +{formatCurrency(liveMatching.total, currency)}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Target Date */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Target Completion Date (Optional)
+                      Target Completion Date
                     </label>
                     <input
                       type="date"
@@ -979,13 +1268,13 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                   </div>
 
                   {/* Notes / Motivation */}
-                  <div className="sm:col-span-2">
+                  <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Notes & Strategy (Optional)
+                      Notes &amp; Strategy (Optional)
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Save from monthly freelance checks; keep in high-yield account"
+                      placeholder="e.g. High-yield reserve; fund from category surplus"
                       value={goalNotes}
                       onChange={(e) => setGoalNotes(e.target.value)}
                       className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
@@ -1014,19 +1303,19 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                 </div>
               </form>
             ) : (
-              <div className="flex items-center justify-between pb-2">
+              <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                    Active Long-Term Goals
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                    Long-Term Savings Targets
                   </h4>
                   <p className="text-[11px] text-slate-500">
-                    Define targets and track progress via transaction tags and manual deposits
+                    Track progress bars, tagged contributions, and monthly budget links
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleOpenAddGoal()}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs whitespace-nowrap shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                   <span>New Goal</span>
@@ -1035,7 +1324,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
             )}
 
             {/* List of Goals */}
-            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
               {savingsGoals.length === 0 ? (
                 <div className="p-8 text-center bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
                   <PiggyBank className="w-8 h-8 text-slate-400 mx-auto mb-2" />
@@ -1043,11 +1332,11 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                     No savings goals established yet
                   </p>
                   <p className="text-[11px] text-slate-500 mt-1 max-w-sm mx-auto">
-                    Create long-term targets like emergency funds or vacation savings, and track your progress with transaction tags.
+                    Create long-term targets like an emergency fund or vacation reserve, and link them to your monthly budget.
                   </p>
                   <button
                     type="button"
-                    onClick={() => handleOpenAddGoal('Emergency Fund', 'Emergency Fund', '5000', 'Housing')}
+                    onClick={() => handleOpenAddGoal('Emergency Fund', 'Emergency Fund', '5000', 'Housing', 'Essential reserve cushion', '250')}
                     className="mt-3 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -1057,10 +1346,22 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
               ) : (
                 savingsGoals.map((goal) => {
                   const savings = calculateGoalSavings(goal, expenses);
+                  const budgetLink = calculateGoalBudgetMetrics(
+                    goal,
+                    expenses,
+                    draftCategoryBudgetsNumeric,
+                    selectedYearMonth
+                  );
                   const isDone = savings.isCompleted;
                   const colors = CATEGORY_COLORS[goal.category];
                   const isExpanded = expandedGoalId === goal.id;
+                  const isEditingCap = editingInlineCapGoalId === goal.id;
                   const activeTag = goal.tag || goal.name;
+
+                  const surplusTransferAmount =
+                    !isDone && budgetLink.categoryRemaining !== null && budgetLink.categoryRemaining > 0
+                      ? Math.min(budgetLink.categoryRemaining, savings.remainingAmount)
+                      : 0;
 
                   return (
                     <div
@@ -1069,21 +1370,20 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
-                              {goal.name}
-                            </span>
-                            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30">
-                              <Tag className="w-2.5 h-2.5" />
-                              #{activeTag}
-                            </span>
-                            <span
-                              className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${colors?.bg || 'bg-slate-100'} ${colors?.text || 'text-slate-700'} ${colors?.border || 'border-slate-300'}`}
-                            >
-                              {goal.category}
-                            </span>
+                          <h5 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
+                            {goal.name}
+                          </h5>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            <span>{goal.category}</span>
+                            <span aria-hidden="true">&middot;</span>
+                            <span className="font-mono text-emerald-700 dark:text-emerald-400">#{activeTag}</span>
+                            {goal.targetDate && (
+                              <>
+                                <span aria-hidden="true">&middot;</span>
+                                <span className="font-mono tabular-nums">Target {goal.targetDate}</span>
+                              </>
+                            )}
                           </div>
-
                           {goal.notes && (
                             <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 truncate">
                               {goal.notes}
@@ -1093,6 +1393,32 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
 
                         {/* Actions */}
                         <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleGoalBudgetLink(goal.id)}
+                            className={`px-2 py-1 text-[10px] font-semibold rounded-md border transition-colors inline-flex items-center gap-1 whitespace-nowrap ${
+                              budgetLink.linkedToBudget
+                                ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                                : 'bg-white dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700 hover:text-slate-800 dark:hover:text-slate-200'
+                            }`}
+                            title={
+                              budgetLink.linkedToBudget
+                                ? 'Linked to monthly budget tracking (click to unlink)'
+                                : 'Not linked to monthly budget (click to link)'
+                            }
+                          >
+                            {budgetLink.linkedToBudget ? (
+                              <>
+                                <Link2 className="w-3 h-3" />
+                                <span>Linked</span>
+                              </>
+                            ) : (
+                              <>
+                                <Unlink className="w-3 h-3" />
+                                <span>Unlinked</span>
+                              </>
+                            )}
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleOpenEditGoal(goal)}
@@ -1119,15 +1445,25 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                             <span className="font-bold text-emerald-600 dark:text-emerald-400 text-sm">
                               {formatCurrency(savings.totalAmount, currency)}
                             </span>
-                            <span className="text-slate-500 font-normal"> / {formatCurrency(goal.targetAmount, currency)}</span>
+                            <span className="text-slate-500 font-normal">
+                              {' '}/ {formatCurrency(goal.targetAmount, currency)}
+                            </span>
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            {isDone && (
-                              <span className="text-[10px] font-bold uppercase text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                          <div className="flex items-center gap-2">
+                            {isDone ? (
+                              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 font-sans">
                                 <Check className="w-3 h-3 stroke-[3]" /> Target Met
                               </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-500">
+                                {formatCurrency(savings.remainingAmount, currency)} left
+                              </span>
                             )}
-                            <span className={`text-xs font-bold ${isDone ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                            <span
+                              className={`text-xs font-bold ${
+                                isDone ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
                               {savings.percentage.toFixed(1)}%
                             </span>
                           </div>
@@ -1136,9 +1472,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                         {/* Dynamic Progress Bar */}
                         <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
                           <div
-                            className={`h-full rounded-full transition-all duration-300 ${
-                              isDone ? 'bg-emerald-500' : 'bg-emerald-500'
-                            }`}
+                            className="h-full rounded-full transition-all duration-300 bg-emerald-500"
                             style={{
                               width: `${Math.min(100, savings.percentage)}%`,
                               backgroundColor: colors?.bar || undefined,
@@ -1149,13 +1483,16 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                         {/* Savings Breakdown: Tagged vs Base */}
                         <div className="mt-1.5 flex flex-wrap items-center justify-between text-[11px] text-slate-500">
                           <div className="flex items-center gap-1 flex-wrap">
-                            <span className="text-emerald-700 dark:text-emerald-400 font-mono font-medium">
+                            <span className="text-emerald-700 dark:text-emerald-400 font-mono tabular-nums font-medium">
                               {formatCurrency(savings.taggedAmount, currency)}
                             </span>
-                            <span>identified from {savings.matchingExpenses.length} tagged transaction{savings.matchingExpenses.length === 1 ? '' : 's'}</span>
+                            <span>
+                              from {savings.matchingExpenses.length} tagged{' '}
+                              {savings.matchingExpenses.length === 1 ? 'entry' : 'entries'}
+                            </span>
                             {savings.baseAmount > 0 && (
-                              <span className="text-slate-400">
-                                (+{formatCurrency(savings.baseAmount, currency)} manual base)
+                              <span className="text-slate-400 font-mono tabular-nums">
+                                (+{formatCurrency(savings.baseAmount, currency)} saved balance)
                               </span>
                             )}
                           </div>
@@ -1166,19 +1503,153 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                               onClick={() => setExpandedGoalId(isExpanded ? null : goal.id)}
                               className="text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-0.5 font-medium ml-auto"
                             >
-                              <span>{isExpanded ? 'Hide' : 'Inspect'} transactions</span>
+                              <span>{isExpanded ? 'Hide' : 'Inspect'} entries</span>
                               {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                             </button>
                           )}
                         </div>
                       </div>
 
+                      {/* Linked Budget Tracking Strip */}
+                      <div className="pt-2 border-t border-slate-200/70 dark:border-slate-800/70 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-slate-600 dark:text-slate-400 font-mono tabular-nums">
+                          {isEditingCap ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-sans text-[11px]">{goal.category} cap:</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="10"
+                                value={inlineCapValue}
+                                onChange={(e) => setInlineCapValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleSaveInlineCategoryCap(goal.category);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingInlineCapGoalId(null);
+                                  }
+                                }}
+                                placeholder="500"
+                                autoFocus
+                                className="w-20 bg-white dark:bg-slate-900 border border-emerald-500 rounded px-1.5 py-0.5 text-[11px] text-slate-900 dark:text-white focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveInlineCategoryCap(goal.category)}
+                                className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 font-sans font-semibold text-[10px]"
+                              >
+                                Set
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingInlineCapGoalId(null)}
+                                className="text-slate-400 hover:text-slate-600 font-sans text-[10px]"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : budgetLink.categoryCap !== undefined ? (
+                            <span>
+                              {goal.category} cap {formatCurrency(budgetLink.categoryCap, currency)} &middot; Spent{' '}
+                              {formatCurrency(budgetLink.categoryMonthSpend, currency)} (
+                              <span
+                                className={
+                                  (budgetLink.categoryRemaining || 0) >= 0
+                                    ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                                    : 'text-rose-600 dark:text-rose-400 font-semibold'
+                                }
+                              >
+                                {(budgetLink.categoryRemaining || 0) >= 0
+                                  ? `${formatCurrency(budgetLink.categoryRemaining || 0, currency)} headroom`
+                                  : `${formatCurrency(Math.abs(budgetLink.categoryRemaining || 0), currency)} over`}
+                              </span>
+                              )
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingInlineCapGoalId(goal.id);
+                                  setInlineCapValue(String(budgetLink.categoryCap ?? ''));
+                                }}
+                                className="ml-1.5 font-sans text-[10px] text-emerald-700 dark:text-emerald-400 hover:underline"
+                              >
+                                Edit cap
+                              </button>
+                            </span>
+                          ) : (
+                            <span className="font-sans">
+                              No {goal.category} monthly cap{' '}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingInlineCapGoalId(goal.id);
+                                  setInlineCapValue('');
+                                }}
+                                className="text-emerald-700 dark:text-emerald-400 hover:underline font-medium"
+                              >
+                                + Set cap
+                              </button>
+                            </span>
+                          )}
+
+                          {budgetLink.linkedToBudget && budgetLink.monthlyContribution > 0 && (
+                            <>
+                              <span aria-hidden="true">&middot;</span>
+                              <span className="text-slate-700 dark:text-slate-300">
+                                {formatCurrency(budgetLink.monthlyContribution, currency)}/mo reserved
+                              </span>
+                            </>
+                          )}
+
+                          {budgetLink.requiredMonthlyPace !== null && !isDone && (
+                            <>
+                              <span aria-hidden="true">&middot;</span>
+                              <span
+                                className={
+                                  budgetLink.isOnPace
+                                    ? 'text-emerald-600 dark:text-emerald-400 font-sans'
+                                    : 'text-amber-600 dark:text-amber-400 font-sans'
+                                }
+                              >
+                                {budgetLink.isOnPace
+                                  ? 'On pace for target'
+                                  : `Pace needs ${formatCurrency(budgetLink.requiredMonthlyPace, currency)}/mo`}
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        {/* Quick Deposits & Fund from Category Surplus */}
+                        <div className="flex items-center gap-1.5 flex-wrap ml-auto">
+                          {surplusTransferAmount >= 10 && (
+                            <button
+                              type="button"
+                              onClick={() => handleQuickAddSavings(goal.id, surplusTransferAmount)}
+                              className="px-2 py-0.5 text-[10px] font-mono font-semibold rounded bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors whitespace-nowrap"
+                              title={`Allocate available ${goal.category} monthly budget headroom into this goal`}
+                            >
+                              + Fund {formatCurrency(surplusTransferAmount, currency)} surplus
+                            </button>
+                          )}
+                          {[50, 100, 250].map((amt) => (
+                            <button
+                              key={amt}
+                              type="button"
+                              onClick={() => handleQuickAddSavings(goal.id, amt)}
+                              className="px-1.5 py-0.5 text-[10px] font-mono tabular-nums font-medium rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                            >
+                              +{currencySymbol}{amt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
                       {/* Expandable Transaction Drawer */}
                       {isExpanded && savings.matchingExpenses.length > 0 && (
                         <div className="p-2.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 space-y-1.5 max-h-44 overflow-y-auto">
-                          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between pb-1 border-b border-slate-100 dark:border-slate-800">
-                            <span>Tagged Ledger Transactions (#{activeTag})</span>
-                            <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                          <div className="text-[10px] font-semibold text-slate-500 flex items-center justify-between pb-1 border-b border-slate-100 dark:border-slate-800">
+                            <span>Tagged Ledger Entries (#{activeTag})</span>
+                            <span className="font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
                               Subtotal: {formatCurrency(savings.taggedAmount, currency)}
                             </span>
                           </div>
@@ -1193,51 +1664,21 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                                 </div>
                                 <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
                                   <span>{exp.date}</span>
-                                  <span>&bull;</span>
+                                  <span>&middot;</span>
                                   <span>{exp.paymentMethod}</span>
-                                  <span>&bull;</span>
+                                  <span>&middot;</span>
                                   <span className="text-emerald-600 dark:text-emerald-400 font-medium">
                                     {exp.tags?.join(', ')}
                                   </span>
                                 </div>
                               </div>
-                              <div className="text-right shrink-0 font-mono font-bold text-slate-900 dark:text-white">
+                              <div className="text-right shrink-0 font-mono tabular-nums font-bold text-slate-900 dark:text-white">
                                 {formatCurrency(exp.amount, currency)}
                               </div>
                             </div>
                           ))}
                         </div>
                       )}
-
-                      {/* Quick Add Deposits & Target Date */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800/60 text-[11px]">
-                        <div className="text-slate-500 flex items-center gap-1 font-mono">
-                          {goal.targetDate ? (
-                            <>
-                              <Calendar className="w-3 h-3 text-slate-400" />
-                              <span>Target: {goal.targetDate}</span>
-                            </>
-                          ) : (
-                            <span>
-                              {formatCurrency(Math.max(0, goal.targetAmount - savings.totalAmount), currency)} remaining to goal
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-slate-400 mr-0.5">Quick deposit:</span>
-                          {[50, 100, 250].map((amt) => (
-                            <button
-                              key={amt}
-                              type="button"
-                              onClick={() => handleQuickAddSavings(goal.id, amt)}
-                              className="px-1.5 py-0.5 text-[10px] font-mono font-medium rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors shadow-2xs"
-                            >
-                              +{currencySymbol}{amt}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
                     </div>
                   );
                 })
@@ -1246,8 +1687,9 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
 
             {/* Modal Bottom Save Action */}
             <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <span className="text-xs text-slate-500">
-                {savingsGoals.length} {savingsGoals.length === 1 ? 'goal' : 'goals'} configured
+              <span className="text-xs text-slate-500 font-mono tabular-nums">
+                {savingsGoals.length} {savingsGoals.length === 1 ? 'goal' : 'goals'} &middot;{' '}
+                {portfolioMetrics.linkedCount} linked to budget
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -1263,7 +1705,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                   className="px-5 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
                 >
                   <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                  <span>Save All Settings & Goals</span>
+                  <span>Save All Settings &amp; Goals</span>
                 </button>
               </div>
             </div>

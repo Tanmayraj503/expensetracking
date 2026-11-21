@@ -81,6 +81,8 @@ export interface SavingsGoal {
   notes?: string;
   createdAt?: string;
   tag?: string; // Tag identifier used to match and accumulate savings from transactions (e.g. "Emergency Fund", "Vacation")
+  monthlyContribution?: number; // Monthly budget allocation reserved toward this savings goal
+  linkedToBudget?: boolean; // Explicitly links this goal to monthly budget & category cap tracking
 }
 
 export interface BudgetSettings {

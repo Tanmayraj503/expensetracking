@@ -1123,7 +1123,15 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
                   {/* Category Context & Quick Deposit */}
                   <div className="pt-2.5 border-t border-slate-200/80 dark:border-slate-800/80 flex items-center justify-between gap-2 text-xs">
                     <div className="text-[10px] text-slate-500 truncate min-w-0">
-                      Spent this mo: <span className="font-mono font-medium text-slate-700 dark:text-slate-300">{formatCurrency(monthSpendInCat, currency)}</span>
+                      Spent this mo:{' '}
+                      <span className="font-mono font-medium text-slate-700 dark:text-slate-300">
+                        {formatCurrency(monthSpendInCat, currency)}
+                      </span>
+                      {goal.linkedToBudget !== false && (goal.monthlyContribution || 0) > 0 && (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-mono ml-1.5">
+                          · {formatCurrency(goal.monthlyContribution || 0, currency)}/mo linked
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
