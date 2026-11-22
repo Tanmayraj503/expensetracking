@@ -27,6 +27,8 @@ import {
   ArrowDownRight,
   CalendarRange,
   Zap,
+  Minus,
+  ArrowLeftRight,
 } from 'lucide-react';
 import {
   PieChart as RechartsPieChart,
@@ -36,6 +38,8 @@ import {
   Tooltip as RechartsTooltip,
   LineChart,
   Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -44,7 +48,16 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { Expense, BudgetSettings, MonthSummary, EndOfMonthProjection, CategoryProjection, ExpenseCategory } from '../types';
-import { formatCurrency, formatMonthYear, formatDateLabel, predictEndOfMonthSpend, getDaysInMonth, CURRENCY_SYMBOLS } from '../utils/formatters';
+import {
+  formatCurrency,
+  formatMonthYear,
+  formatDateLabel,
+  predictEndOfMonthSpend,
+  getDaysInMonth,
+  getPreviousYearMonth,
+  calculateCategoryBreakdown,
+  CURRENCY_SYMBOLS,
+} from '../utils/formatters';
 import { CATEGORY_COLORS } from '../data/sampleExpenses';
 
 interface FinancialInsight {
@@ -680,6 +693,123 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
     };
   }, [expenses, selectedYearMonth, spendingTrendCategory, budgetSettings.dailyTarget]);
 
+  // --------------------------------------------------------------------------
+  // Month-over-Month (MoM) Spending Comparison (Selected vs. Previous Month)
+  // --------------------------------------------------------------------------
+  const monthOverMonth = useMemo(() => {
+    const prevYearMonth = getPreviousYearMonth(selectedYearMonth);
+    const currentLabel = formatMonthYear(selectedYearMonth);
+    const prevLabel = formatMonthYear(prevYearMonth);
+
+    const currentExpenses = expenses.filter((e) => e.date.startsWith(selectedYearMonth));
+    const prevExpenses = expenses.filter((e) => e.date.startsWith(prevYearMonth));
+
+    const currentTotal = Math.round(currentExpenses.reduce((sum, e) => sum + e.amount, 0) * 100) / 100;
+    const prevTotal = Math.round(prevExpenses.reduce((sum, e) => sum + e.amount, 0) * 100) / 100;
+    const absoluteDelta = Math.round((currentTotal - prevTotal) * 100) / 100;
+
+    let percentChange: number | null = null;
+    if (prevTotal > 0) {
+      percentChange = Math.round(((currentTotal - prevTotal) / prevTotal) * 1000) / 10;
+    }
+
+    let direction: 'up' | 'down' | 'flat' | 'no-baseline' = 'flat';
+    if (prevTotal === 0 && currentTotal > 0) {
+      direction = 'no-baseline';
+    } else if (prevTotal === 0 && currentTotal === 0) {
+      direction = 'flat';
+    } else if (absoluteDelta > 0.01) {
+      direction = 'up';
+    } else if (absoluteDelta < -0.01) {
+      direction = 'down';
+    }
+
+    const currentTxCount = currentExpenses.length;
+    const prevTxCount = prevExpenses.length;
+    const currentAvgTx = currentTxCount > 0 ? currentTotal / currentTxCount : 0;
+    const prevAvgTx = prevTxCount > 0 ? prevTotal / prevTxCount : 0;
+
+    // Same-period pace (Day 1..daysElapsed) when selected month is still in progress
+    const isPartialMonth = forecast.daysElapsed > 0 && forecast.daysElapsed < forecast.daysInMonth;
+    const paceDays = isPartialMonth ? forecast.daysElapsed : Math.min(forecast.daysInMonth, getDaysInMonth(prevYearMonth));
+    const mtdCurrent = isPartialMonth
+      ? currentExpenses
+          .filter((e) => parseInt(e.date.split('-')[2], 10) <= paceDays)
+          .reduce((sum, e) => sum + e.amount, 0)
+      : currentTotal;
+    const mtdPrev = isPartialMonth
+      ? prevExpenses
+          .filter((e) => parseInt(e.date.split('-')[2], 10) <= paceDays)
+          .reduce((sum, e) => sum + e.amount, 0)
+      : prevTotal;
+    const mtdDelta = Math.round((mtdCurrent - mtdPrev) * 100) / 100;
+    const mtdPercentChange =
+      mtdPrev > 0 ? Math.round(((mtdCurrent - mtdPrev) / mtdPrev) * 1000) / 10 : null;
+
+    // Category-level comparison
+    const currCatMap = new Map<ExpenseCategory, number>();
+    calculateCategoryBreakdown(currentExpenses).forEach((c) => {
+      currCatMap.set(c.category, c.amount);
+    });
+    const prevCatMap = new Map<ExpenseCategory, number>();
+    calculateCategoryBreakdown(prevExpenses).forEach((c) => {
+      prevCatMap.set(c.category, c.amount);
+    });
+
+    const allCats = new Set<ExpenseCategory>([
+      ...currCatMap.keys(),
+      ...prevCatMap.keys(),
+    ]);
+
+    const categoryDrivers = Array.from(allCats)
+      .map((cat) => {
+        const currAmt = Math.round((currCatMap.get(cat) || 0) * 100) / 100;
+        const prevAmt = Math.round((prevCatMap.get(cat) || 0) * 100) / 100;
+        const delta = Math.round((currAmt - prevAmt) * 100) / 100;
+        const pct = prevAmt > 0 ? Math.round(((currAmt - prevAmt) / prevAmt) * 1000) / 10 : null;
+        return {
+          category: cat,
+          shortName: cat.length > 13 ? `${cat.slice(0, 12)}…` : cat,
+          currentAmount: currAmt,
+          prevAmount: prevAmt,
+          delta,
+          pctChange: pct,
+          color: CATEGORY_COLORS[cat]?.bar || '#10b981',
+        };
+      })
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+    const chartData = [...categoryDrivers]
+      .sort(
+        (a, b) =>
+          Math.max(b.currentAmount, b.prevAmount) - Math.max(a.currentAmount, a.prevAmount)
+      )
+      .slice(0, 6);
+
+    return {
+      prevYearMonth,
+      currentLabel,
+      prevLabel,
+      currentTotal,
+      prevTotal,
+      absoluteDelta,
+      percentChange,
+      direction,
+      currentTxCount,
+      prevTxCount,
+      currentAvgTx,
+      prevAvgTx,
+      isPartialMonth,
+      paceDays,
+      mtdCurrent,
+      mtdPrev,
+      mtdDelta,
+      mtdPercentChange,
+      categoryDrivers,
+      chartData,
+    };
+  }, [expenses, selectedYearMonth, forecast.daysElapsed, forecast.daysInMonth]);
+
   return (
     <div className="space-y-6">
       {/* Top Controls & Header */}
@@ -727,6 +857,343 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
             <span>{isLoading ? 'Analyzing...' : 'Re-Analyze'}</span>
           </button>
         </div>
+      </div>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* MONTH-OVER-MONTH (MoM) SPENDING COMPARISON                             */}
+      {/* ---------------------------------------------------------------------- */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 shadow-xs transition-colors space-y-5">
+        {/* Section Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
+                <ArrowLeftRight className="w-4 h-4" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                Month-over-Month Comparison
+              </h3>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+              Total spending variance between{' '}
+              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                {monthOverMonth.currentLabel}
+              </span>{' '}
+              and{' '}
+              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                {monthOverMonth.prevLabel}
+              </span>
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {availableMonths.includes(monthOverMonth.prevYearMonth) && (
+              <button
+                type="button"
+                onClick={() => onSelectYearMonth(monthOverMonth.prevYearMonth)}
+                className="px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-lg transition-colors whitespace-nowrap"
+              >
+                View {monthOverMonth.prevLabel} &rarr;
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 4-Column MoM Summary Strip */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Selected Month Total */}
+          <div className="p-4 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-1">
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {monthOverMonth.currentLabel}
+            </div>
+            <div className="text-2xl font-bold font-mono tabular-nums text-slate-950 dark:text-white">
+              {formatCurrency(monthOverMonth.currentTotal, currency)}
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+              {monthOverMonth.currentTxCount} {monthOverMonth.currentTxCount === 1 ? 'tx' : 'txs'} &middot;{' '}
+              {formatCurrency(monthOverMonth.currentAvgTx, currency)} avg
+            </div>
+          </div>
+
+          {/* Previous Month Total */}
+          <div className="p-4 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-1">
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {monthOverMonth.prevLabel}
+            </div>
+            <div className="text-2xl font-bold font-mono tabular-nums text-slate-950 dark:text-white">
+              {formatCurrency(monthOverMonth.prevTotal, currency)}
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+              {monthOverMonth.prevTxCount} {monthOverMonth.prevTxCount === 1 ? 'tx' : 'txs'} &middot;{' '}
+              {formatCurrency(monthOverMonth.prevAvgTx, currency)} avg
+            </div>
+          </div>
+
+          {/* Percentage Increase / Decrease */}
+          <div className="p-4 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-1">
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              Month-over-Month Change
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span
+                className={`text-2xl font-bold font-mono tabular-nums inline-flex items-center gap-1 ${
+                  monthOverMonth.direction === 'down'
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : monthOverMonth.direction === 'up'
+                    ? 'text-rose-600 dark:text-rose-400'
+                    : 'text-slate-800 dark:text-slate-200'
+                }`}
+              >
+                {monthOverMonth.direction === 'down' ? (
+                  <TrendingDown className="w-5 h-5 shrink-0" />
+                ) : monthOverMonth.direction === 'up' ? (
+                  <TrendingUp className="w-5 h-5 shrink-0" />
+                ) : (
+                  <Minus className="w-5 h-5 shrink-0" />
+                )}
+                <span>
+                  {monthOverMonth.percentChange !== null
+                    ? `${monthOverMonth.percentChange > 0 ? '+' : ''}${monthOverMonth.percentChange.toFixed(1)}%`
+                    : monthOverMonth.direction === 'no-baseline'
+                    ? 'New'
+                    : '0.0%'}
+                </span>
+              </span>
+            </div>
+            <div className="text-[11px] font-mono tabular-nums text-slate-600 dark:text-slate-400">
+              {monthOverMonth.direction === 'no-baseline'
+                ? `No spend in ${monthOverMonth.prevLabel}`
+                : `${monthOverMonth.absoluteDelta > 0 ? '+' : monthOverMonth.absoluteDelta < 0 ? '-' : ''}${formatCurrency(Math.abs(monthOverMonth.absoluteDelta), currency)} (${
+                    monthOverMonth.direction === 'down'
+                      ? 'decrease'
+                      : monthOverMonth.direction === 'up'
+                      ? 'increase'
+                      : 'unchanged'
+                  })`}
+            </div>
+          </div>
+
+          {/* Same-Day Pace or Daily Average Comparison */}
+          <div className="p-4 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-1">
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {monthOverMonth.isPartialMonth
+                ? `Same-Period Pace (Days 1–${monthOverMonth.paceDays})`
+                : 'Daily Spend Average'}
+            </div>
+            <div className="text-2xl font-bold font-mono tabular-nums text-slate-950 dark:text-white">
+              {monthOverMonth.isPartialMonth ? (
+                monthOverMonth.mtdPercentChange !== null ? (
+                  <span
+                    className={
+                      monthOverMonth.mtdPercentChange <= 0
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }
+                  >
+                    {monthOverMonth.mtdPercentChange > 0 ? '+' : ''}
+                    {monthOverMonth.mtdPercentChange.toFixed(1)}%
+                  </span>
+                ) : (
+                  <span>{formatCurrency(monthOverMonth.mtdCurrent, currency)}</span>
+                )
+              ) : (
+                <span>
+                  {formatCurrency(
+                    monthOverMonth.currentTotal / Math.max(1, getDaysInMonth(selectedYearMonth)),
+                    currency
+                  )}
+                  <span className="text-xs font-normal text-slate-500 font-sans">/day</span>
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
+              {monthOverMonth.isPartialMonth
+                ? `${formatCurrency(monthOverMonth.mtdCurrent, currency)} vs ${formatCurrency(monthOverMonth.mtdPrev, currency)}`
+                : `Prev avg: ${formatCurrency(
+                    monthOverMonth.prevTotal / Math.max(1, getDaysInMonth(monthOverMonth.prevYearMonth)),
+                    currency
+                  )}/day`}
+            </div>
+          </div>
+        </div>
+
+        {/* Category Comparison Chart & Top Movers */}
+        {monthOverMonth.chartData.length > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-1">
+            {/* Grouped Bar Chart: Top Categories (Previous vs Selected Month) */}
+            <div className="lg:col-span-7 flex flex-col">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  Category Spend Comparison
+                </span>
+                <div className="flex items-center gap-4 text-[11px]">
+                  <span className="inline-flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-slate-400 dark:bg-slate-600 inline-block" />
+                    <span>{monthOverMonth.prevLabel}</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-slate-700 dark:text-slate-200 font-medium">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block" />
+                    <span>{monthOverMonth.currentLabel}</span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="w-full h-60 select-none">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={monthOverMonth.chartData}
+                    margin={{ top: 8, right: 12, left: 0, bottom: 4 }}
+                    barGap={4}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke={theme === 'light' ? '#e2e8f0' : '#1e293b'}
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="shortName"
+                      stroke={theme === 'light' ? '#64748b' : '#94a3b8'}
+                      fontSize={10}
+                      tickLine={false}
+                      axisLine={{ stroke: theme === 'light' ? '#cbd5e1' : '#334155' }}
+                    />
+                    <YAxis
+                      stroke={theme === 'light' ? '#64748b' : '#94a3b8'}
+                      fontSize={10}
+                      tickLine={false}
+                      axisLine={{ stroke: theme === 'light' ? '#cbd5e1' : '#334155' }}
+                      tickFormatter={(val) => {
+                        const sym = CURRENCY_SYMBOLS[currency] || '$';
+                        return val >= 1000 ? `${sym}${(val / 1000).toFixed(1)}k` : `${sym}${val}`;
+                      }}
+                      width={52}
+                    />
+                    <RechartsTooltip
+                      cursor={{ fill: theme === 'light' ? 'rgba(148,163,184,0.1)' : 'rgba(148,163,184,0.08)' }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const row = payload[0]?.payload;
+                          if (!row) return null;
+                          return (
+                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3 rounded-xl shadow-xl text-xs font-mono space-y-1.5 min-w-[200px]">
+                              <div className="font-sans font-bold text-slate-900 dark:text-white pb-1 border-b border-slate-100 dark:border-slate-800">
+                                {row.category}
+                              </div>
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="font-sans text-slate-500">{monthOverMonth.prevLabel}:</span>
+                                <span className="tabular-nums text-slate-700 dark:text-slate-300">
+                                  {formatCurrency(row.prevAmount, currency)}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="font-sans text-slate-500">{monthOverMonth.currentLabel}:</span>
+                                <span className="font-bold tabular-nums text-slate-950 dark:text-white">
+                                  {formatCurrency(row.currentAmount, currency)}
+                                </span>
+                              </div>
+                              <div className="pt-1 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+                                <span className="font-sans text-slate-500">Change:</span>
+                                <span
+                                  className={`font-bold tabular-nums ${
+                                    row.delta <= 0
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : 'text-rose-600 dark:text-rose-400'
+                                  }`}
+                                >
+                                  {row.delta > 0 ? '+' : row.delta < 0 ? '-' : ''}
+                                  {formatCurrency(Math.abs(row.delta), currency)}
+                                  {row.pctChange !== null
+                                    ? ` (${row.pctChange > 0 ? '+' : ''}${row.pctChange.toFixed(1)}%)`
+                                    : ''}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar
+                      dataKey="prevAmount"
+                      name={monthOverMonth.prevLabel}
+                      fill={theme === 'light' ? '#94a3b8' : '#475569'}
+                      radius={[4, 4, 0, 0]}
+                      maxBarSize={24}
+                    />
+                    <Bar
+                      dataKey="currentAmount"
+                      name={monthOverMonth.currentLabel}
+                      fill="#10b981"
+                      radius={[4, 4, 0, 0]}
+                      maxBarSize={24}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Top Category Movers Table */}
+            <div className="lg:col-span-5 flex flex-col">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  Biggest Category Shifts
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  vs {monthOverMonth.prevLabel}
+                </span>
+              </div>
+
+              <div className="divide-y divide-slate-100 dark:divide-slate-800/80 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/60 dark:bg-slate-950/40 overflow-hidden">
+                {monthOverMonth.categoryDrivers.slice(0, 5).map((item) => {
+                  const isDown = item.delta < -0.01;
+                  const isUp = item.delta > 0.01;
+                  return (
+                    <div
+                      key={item.category}
+                      className="px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs hover:bg-white dark:hover:bg-slate-900/60 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900 dark:text-white truncate">
+                          {item.category}
+                        </div>
+                        <div className="text-[10px] font-mono tabular-nums text-slate-500">
+                          {formatCurrency(item.prevAmount, currency)} &rarr;{' '}
+                          {formatCurrency(item.currentAmount, currency)}
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0 font-mono tabular-nums">
+                        <div
+                          className={`font-bold text-xs ${
+                            isDown
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : isUp
+                              ? 'text-rose-600 dark:text-rose-400'
+                              : 'text-slate-500'
+                          }`}
+                        >
+                          {item.pctChange !== null
+                            ? `${item.pctChange > 0 ? '+' : ''}${item.pctChange.toFixed(1)}%`
+                            : item.currentAmount > 0
+                            ? 'New'
+                            : '0.0%'}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          {isUp ? '+' : isDown ? '-' : ''}
+                          {formatCurrency(Math.abs(item.delta), currency)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="p-6 text-center bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-500">
+            No expenses logged in {monthOverMonth.currentLabel} or {monthOverMonth.prevLabel} to compare yet.
+          </div>
+        )}
       </div>
 
       {/* ---------------------------------------------------------------------- */}
