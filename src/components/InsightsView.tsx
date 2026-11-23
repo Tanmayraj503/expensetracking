@@ -58,7 +58,7 @@ import {
   calculateCategoryBreakdown,
   CURRENCY_SYMBOLS,
 } from '../utils/formatters';
-import { CATEGORY_COLORS } from '../data/sampleExpenses';
+import { CATEGORY_COLORS, CATEGORIES } from '../data/sampleExpenses';
 
 interface FinancialInsight {
   overallHealth: {
@@ -176,6 +176,7 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
   const [showConfidenceBands, setShowConfidenceBands] = useState<boolean>(true);
   const [showIdealPace, setShowIdealPace] = useState<boolean>(true);
   const [showCategoryForecast, setShowCategoryForecast] = useState<boolean>(false);
+  const [categoryLimitFilter, setCategoryLimitFilter] = useState<'all' | 'capped' | 'attention'>('all');
 
   const currency = budgetSettings.currency;
 
@@ -810,6 +811,103 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
     };
   }, [expenses, selectedYearMonth, forecast.daysElapsed, forecast.daysInMonth]);
 
+  // --------------------------------------------------------------------------
+  // Category Spending Limits & Progress (Selected Month vs Assigned Caps)
+  // --------------------------------------------------------------------------
+  const categoryLimitProgress = useMemo(() => {
+    const monthExpenses = expenses.filter((e) => e.date.startsWith(selectedYearMonth));
+    const spendMap = new Map<ExpenseCategory, { spent: number; count: number }>();
+
+    monthExpenses.forEach((exp) => {
+      const current = spendMap.get(exp.category) || { spent: 0, count: 0 };
+      spendMap.set(exp.category, {
+        spent: current.spent + exp.amount,
+        count: current.count + 1,
+      });
+    });
+
+    const items = CATEGORIES.map((category) => {
+      const data = spendMap.get(category) || { spent: 0, count: 0 };
+      const spent = Math.round(data.spent * 100) / 100;
+      const rawLimit = budgetSettings.categoryBudgets?.[category];
+      const hasLimit = typeof rawLimit === 'number' && !isNaN(rawLimit) && rawLimit >= 0;
+      const limit = hasLimit ? rawLimit : null;
+
+      let percentage: number | null = null;
+      if (hasLimit && limit !== null) {
+        if (limit > 0) {
+          percentage = (spent / limit) * 100;
+        } else {
+          percentage = spent > 0 ? 100 : 0;
+        }
+      }
+
+      const remaining = hasLimit && limit !== null ? Math.round((limit - spent) * 100) / 100 : null;
+      const isOver = hasLimit && limit !== null && spent > limit + 0.005;
+      const isNear = hasLimit && !isOver && percentage !== null && percentage >= 75;
+      const status: 'over' | 'warning' | 'on-track' | 'unbudgeted' = !hasLimit
+        ? 'unbudgeted'
+        : isOver
+        ? 'over'
+        : isNear
+        ? 'warning'
+        : 'on-track';
+
+      return {
+        category,
+        spent,
+        txCount: data.count,
+        limit,
+        hasLimit,
+        percentage,
+        remaining,
+        status,
+        color: CATEGORY_COLORS[category]?.bar || '#10b981',
+      };
+    });
+
+    const activeOrCapped = items
+      .filter((item) => item.hasLimit || item.spent > 0)
+      .sort((a, b) => {
+        if (a.hasLimit !== b.hasLimit) return a.hasLimit ? -1 : 1;
+        if (a.hasLimit && b.hasLimit) {
+          return (b.percentage || 0) - (a.percentage || 0);
+        }
+        return b.spent - a.spent;
+      });
+
+    const cappedItems = items.filter((item) => item.hasLimit);
+    const totalAssignedLimits = Math.round(
+      cappedItems.reduce((sum, item) => sum + (item.limit || 0), 0) * 100
+    ) / 100;
+    const totalSpentInCapped = Math.round(
+      cappedItems.reduce((sum, item) => sum + item.spent, 0) * 100
+    ) / 100;
+    const overallCappedPct =
+      totalAssignedLimits > 0
+        ? (totalSpentInCapped / totalAssignedLimits) * 100
+        : totalSpentInCapped > 0
+        ? 100
+        : 0;
+
+    const overLimitCount = cappedItems.filter((i) => i.status === 'over').length;
+    const nearLimitCount = cappedItems.filter((i) => i.status === 'warning').length;
+    const onTrackCount = cappedItems.filter((i) => i.status === 'on-track').length;
+    const unbudgetedActiveCount = items.filter((i) => !i.hasLimit && i.spent > 0).length;
+
+    return {
+      items: activeOrCapped,
+      cappedItems,
+      totalAssignedLimits,
+      totalSpentInCapped,
+      overallCappedPct,
+      overLimitCount,
+      nearLimitCount,
+      onTrackCount,
+      unbudgetedActiveCount,
+    };
+  }, [expenses, selectedYearMonth, budgetSettings.categoryBudgets]);
+
   return (
     <div className="space-y-6">
       {/* Top Controls & Header */}
@@ -1194,6 +1292,324 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
             No expenses logged in {monthOverMonth.currentLabel} or {monthOverMonth.prevLabel} to compare yet.
           </div>
         )}
+      </div>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* CATEGORY SPENDING LIMITS & BUDGET PROGRESS                             */}
+      {/* ---------------------------------------------------------------------- */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 shadow-xs transition-colors space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
+                <Layers className="w-4 h-4" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                Category Spending Limits &amp; Progress
+              </h3>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+              {formatMonthYear(selectedYearMonth)} category spend tracked against individual budget caps
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* View Filter */}
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-lg border border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setCategoryLimitFilter('all')}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                  categoryLimitFilter === 'all'
+                    ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                All Active ({categoryLimitProgress.items.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategoryLimitFilter('capped')}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                  categoryLimitFilter === 'capped'
+                    ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                With Limits ({categoryLimitProgress.cappedItems.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategoryLimitFilter('attention')}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                  categoryLimitFilter === 'attention'
+                    ? 'bg-white dark:bg-slate-900 text-slate-950 dark:text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Near / Over ({categoryLimitProgress.overLimitCount + categoryLimitProgress.nearLimitCount})
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={onOpenBudgetModal}
+              className="px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-800/60 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>Edit Category Limits</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 4-Column Summary Strip */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-1">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">
+              Capped Categories
+            </span>
+            <span className="text-xl font-bold font-mono tabular-nums text-slate-950 dark:text-white block">
+              {categoryLimitProgress.cappedItems.length}
+              <span className="text-xs font-normal text-slate-500 ml-1">/ {CATEGORIES.length}</span>
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+              {categoryLimitProgress.unbudgetedActiveCount} active without limit
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-1">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">
+              Capped Spend Utilization
+            </span>
+            <span className="text-xl font-bold font-mono tabular-nums text-slate-950 dark:text-white block">
+              {categoryLimitProgress.cappedItems.length > 0
+                ? `${categoryLimitProgress.overallCappedPct.toFixed(1)}%`
+                : '—'}
+            </span>
+            <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 block">
+              {formatCurrency(categoryLimitProgress.totalSpentInCapped, currency)} of{' '}
+              {formatCurrency(categoryLimitProgress.totalAssignedLimits, currency)}
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-1">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">
+              Within Limit (&lt;75%)
+            </span>
+            <span className="text-xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 block">
+              {categoryLimitProgress.onTrackCount}
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+              Categories comfortably on track
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-1">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">
+              Needs Attention
+            </span>
+            <span
+              className={`text-xl font-bold font-mono tabular-nums block ${
+                categoryLimitProgress.overLimitCount > 0
+                  ? 'text-rose-600 dark:text-rose-400'
+                  : categoryLimitProgress.nearLimitCount > 0
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-slate-950 dark:text-white'
+              }`}
+            >
+              {categoryLimitProgress.overLimitCount + categoryLimitProgress.nearLimitCount}
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+              {categoryLimitProgress.overLimitCount} over limit &middot;{' '}
+              {categoryLimitProgress.nearLimitCount} approaching
+            </span>
+          </div>
+        </div>
+
+        {/* Category Progress Cards */}
+        {(() => {
+          const filteredCategoryItems = categoryLimitProgress.items.filter((item) => {
+            if (categoryLimitFilter === 'capped') return item.hasLimit;
+            if (categoryLimitFilter === 'attention') {
+              return item.status === 'over' || item.status === 'warning';
+            }
+            return true;
+          });
+
+          if (filteredCategoryItems.length === 0) {
+            return (
+              <div className="p-6 text-center bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                {categoryLimitFilter === 'attention' && categoryLimitProgress.cappedItems.length > 0 ? (
+                  <>
+                    <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto" />
+                    <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      All capped categories are under 75% of their limits
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      No categories are approaching or exceeding their assigned budget caps in{' '}
+                      {formatMonthYear(selectedYearMonth)}.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      {categoryLimitFilter === 'capped'
+                        ? 'No category spending limits configured yet'
+                        : `No category activity recorded for ${formatMonthYear(selectedYearMonth)}`}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={onOpenBudgetModal}
+                      className="px-3.5 py-1.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors"
+                    >
+                      Configure Category Limits
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          }
+
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              {filteredCategoryItems.map((item) => {
+                const pct = item.percentage ?? 0;
+                const barWidth = item.spent === 0 ? 0 : Math.min(100, Math.max(2, pct));
+                const barColorClass =
+                  item.status === 'over'
+                    ? 'bg-rose-500'
+                    : item.status === 'warning'
+                    ? 'bg-amber-500'
+                    : 'bg-emerald-500';
+
+                return (
+                  <div
+                    key={item.category}
+                    className="p-4 bg-slate-50/70 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                            {item.category}
+                          </span>
+                          <span className="text-[10px] font-mono tabular-nums text-slate-500 shrink-0">
+                            &middot; {item.txCount} {item.txCount === 1 ? 'tx' : 'txs'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {item.status === 'over' && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 shrink-0">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                          <span>Over Limit</span>
+                        </span>
+                      )}
+                      {item.status === 'warning' && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 shrink-0">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                          <span>Approaching Limit</span>
+                        </span>
+                      )}
+                      {item.status === 'on-track' && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>On Track</span>
+                        </span>
+                      )}
+                      {item.status === 'unbudgeted' && (
+                        <button
+                          type="button"
+                          onClick={onOpenBudgetModal}
+                          className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:underline shrink-0"
+                        >
+                          + Set Limit
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-baseline justify-between gap-2 text-xs font-mono tabular-nums">
+                      <div>
+                        <span className="font-bold text-slate-950 dark:text-white">
+                          {formatCurrency(item.spent, currency)}
+                        </span>
+                        {item.hasLimit && item.limit !== null ? (
+                          <span className="text-slate-500 dark:text-slate-400">
+                            {' '}
+                            / {formatCurrency(item.limit, currency)} limit
+                          </span>
+                        ) : (
+                          <span className="text-slate-500 dark:text-slate-400 font-sans text-[11px]">
+                            {' '}
+                            spent &middot; no limit assigned
+                          </span>
+                        )}
+                      </div>
+
+                      {item.hasLimit && item.percentage !== null && (
+                        <span
+                          className={`font-bold ${
+                            item.status === 'over'
+                              ? 'text-rose-600 dark:text-rose-400'
+                              : item.status === 'warning'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-emerald-600 dark:text-emerald-400'
+                          }`}
+                        >
+                          {item.percentage.toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
+
+                    {item.hasLimit && item.limit !== null ? (
+                      <div className="space-y-1">
+                        <div
+                          className="w-full h-2.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden"
+                          role="progressbar"
+                          aria-label={`${item.category} spending progress`}
+                          aria-valuenow={Math.round(pct)}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                        >
+                          <div
+                            className={`h-full rounded-full transition-all duration-300 ${barColorClass}`}
+                            style={{ width: `${barWidth}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
+                          <span className="text-slate-500 dark:text-slate-400 font-sans">
+                            {item.status === 'over'
+                              ? 'Exceeded monthly cap'
+                              : item.status === 'warning'
+                              ? 'High utilization'
+                              : 'Budget headroom'}
+                          </span>
+                          <span
+                            className={
+                              item.status === 'over'
+                                ? 'text-rose-600 dark:text-rose-400 font-semibold'
+                                : 'text-slate-600 dark:text-slate-300'
+                            }
+                          >
+                            {item.remaining !== null && item.remaining >= 0
+                              ? `${formatCurrency(item.remaining, currency)} remaining`
+                              : `${formatCurrency(Math.abs(item.remaining || 0), currency)} over`}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="w-full h-1.5 bg-slate-200/70 dark:bg-slate-800/70 rounded-full overflow-hidden" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ---------------------------------------------------------------------- */}
