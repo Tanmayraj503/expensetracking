@@ -623,6 +623,8 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
       topCategory: string | null;
       topCategoryAmount: number;
       isOverTarget: boolean;
+      isHighSpend: boolean;
+      isPeakDay: boolean;
     }> = [];
 
     for (let d = 1; d <= daysInMonth; d++) {
@@ -657,6 +659,8 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
         topCategory,
         topCategoryAmount,
         isOverTarget: dailyTarget > 0 && dailySpend > dailyTarget,
+        isHighSpend: false,
+        isPeakDay: false,
       });
     }
 
@@ -668,18 +672,71 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
       points[i].rollingAvg = Math.round(avg * 100) / 100;
     }
 
-    const totalSpend = points.reduce((sum, p) => sum + p.dailySpend, 0);
+    const totalSpend = Math.round(points.reduce((sum, p) => sum + p.dailySpend, 0) * 100) / 100;
     const activeDaysCount = points.filter((p) => p.dailySpend > 0).length;
-    const elapsedDays =
-      selectedYearMonth === '2026-10'
-        ? Math.min(daysInMonth, 29)
-        : daysInMonth;
+    const elapsedDays = forecast.daysElapsed > 0 ? forecast.daysElapsed : daysInMonth;
     const avgDailySpend = elapsedDays > 0 ? totalSpend / elapsedDays : 0;
     const peakDay = [...points].sort((a, b) => b.dailySpend - a.dailySpend)[0] || null;
     const daysOverTarget =
       spendingTrendCategory === 'all' && dailyTarget > 0
         ? points.filter((p) => p.dailySpend > dailyTarget).length
         : 0;
+
+    // Identify high-spend threshold (daily target when viewing all categories, else 1.5x daily average)
+    const highSpendThreshold =
+      spendingTrendCategory === 'all' && dailyTarget > 0
+        ? dailyTarget
+        : avgDailySpend > 0
+        ? Math.round(avgDailySpend * 1.5 * 100) / 100
+        : 0;
+
+    points.forEach((p) => {
+      p.isHighSpend = p.dailySpend > 0 && highSpendThreshold > 0 && p.dailySpend > highSpendThreshold;
+      p.isPeakDay = Boolean(peakDay && peakDay.dailySpend > 0 && p.day === peakDay.day);
+    });
+
+    // Group contiguous high-spend days into high-spend periods/windows
+    const highSpendPeriods: Array<{
+      id: string;
+      label: string;
+      startDay: number;
+      endDay: number;
+      dayCount: number;
+      totalSpend: number;
+      peakSpend: number;
+      topCategory: string | null;
+    }> = [];
+
+    let currentWindow: typeof points = [];
+    const flushWindow = () => {
+      if (currentWindow.length === 0) return;
+      const first = currentWindow[0];
+      const last = currentWindow[currentWindow.length - 1];
+      const windowTotal = Math.round(currentWindow.reduce((s, d) => s + d.dailySpend, 0) * 100) / 100;
+      const windowPeak = [...currentWindow].sort((a, b) => b.dailySpend - a.dailySpend)[0];
+      highSpendPeriods.push({
+        id: `${first.day}-${last.day}`,
+        label: first.day === last.day ? first.shortDate : `${first.shortDate} – ${last.shortDate}`,
+        startDay: first.day,
+        endDay: last.day,
+        dayCount: currentWindow.length,
+        totalSpend: windowTotal,
+        peakSpend: windowPeak.dailySpend,
+        topCategory: windowPeak.topCategory,
+      });
+      currentWindow = [];
+    };
+
+    points.forEach((p) => {
+      if (p.isHighSpend) {
+        currentWindow.push(p);
+      } else {
+        flushWindow();
+      }
+    });
+    flushWindow();
+
+    highSpendPeriods.sort((a, b) => b.totalSpend - a.totalSpend);
 
     return {
       points,
@@ -691,8 +748,11 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
       daysOverTarget,
       daysInMonth,
       txTotal: activeExpenses.length,
+      highSpendThreshold,
+      highSpendPeriods,
+      highSpendDaysCount: points.filter((p) => p.isHighSpend).length,
     };
-  }, [expenses, selectedYearMonth, spendingTrendCategory, budgetSettings.dailyTarget]);
+  }, [expenses, selectedYearMonth, spendingTrendCategory, budgetSettings.dailyTarget, forecast.daysElapsed]);
 
   // --------------------------------------------------------------------------
   // Month-over-Month (MoM) Spending Comparison (Selected vs. Previous Month)
@@ -955,6 +1015,453 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
             <span>{isLoading ? 'Analyzing...' : 'Re-Analyze'}</span>
           </button>
         </div>
+      </div>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* DAILY SPENDING TREND OVER SELECTED MONTH (RECHARTS LINE CHART)         */}
+      {/* ---------------------------------------------------------------------- */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 shadow-xs transition-colors space-y-5">
+        {/* Header & Overlay Toggles */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
+                <Activity className="w-4 h-4" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                Daily Spending Trend — {formatMonthYear(selectedYearMonth)}
+              </h3>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+              Day-by-day total spending across {formatMonthYear(selectedYearMonth)} ({monthlyDailyTrend.txTotal}{' '}
+              {monthlyDailyTrend.txTotal === 1 ? 'transaction' : 'transactions'}) with high-spend spikes highlighted
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowTrendRollingAvg((prev) => !prev)}
+              className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors flex items-center gap-1.5 ${
+                showTrendRollingAvg
+                  ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800'
+                  : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  showTrendRollingAvg ? 'bg-indigo-500' : 'bg-slate-400'
+                }`}
+              />
+              <span>7-Day Moving Avg</span>
+            </button>
+
+            {spendingTrendCategory === 'all' && budgetSettings.dailyTarget > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowDailyTargetLine((prev) => !prev)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors flex items-center gap-1.5 ${
+                  showDailyTargetLine
+                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                    : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    showDailyTargetLine ? 'bg-amber-500' : 'bg-slate-400'
+                  }`}
+                />
+                <span>Daily Target ({formatCurrency(budgetSettings.dailyTarget, currency)})</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Category Filter Tabs */}
+        {monthlyDailyTrend.availableCategories.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSpendingTrendCategory('all')}
+              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
+                spendingTrendCategory === 'all'
+                  ? 'bg-emerald-500 text-slate-950 border-emerald-500 font-semibold shadow-2xs'
+                  : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              All Categories
+            </button>
+            {monthlyDailyTrend.availableCategories.map((cat) => {
+              const active = spendingTrendCategory === cat;
+              const catColor = CATEGORY_COLORS[cat]?.bar || '#10b981';
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setSpendingTrendCategory(active ? 'all' : cat)}
+                  className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors flex items-center gap-1.5 ${
+                    active
+                      ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 border-slate-900 dark:border-white font-semibold shadow-2xs'
+                      : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                  }`}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: catColor }}
+                  />
+                  <span>{cat}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Quick Summary Strip */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block">
+              {spendingTrendCategory === 'all' ? 'Month Total' : `${spendingTrendCategory} Total`}
+            </span>
+            <span className="text-lg font-bold font-mono tabular-nums text-slate-950 dark:text-white mt-0.5 block">
+              {formatCurrency(monthlyDailyTrend.totalSpend, currency)}
+            </span>
+          </div>
+
+          <div className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block">
+              Daily Average
+            </span>
+            <span className="text-lg font-bold font-mono tabular-nums text-slate-950 dark:text-white mt-0.5 block">
+              {formatCurrency(monthlyDailyTrend.avgDailySpend, currency)}
+              <span className="text-[11px] font-normal text-slate-500 font-sans">/day</span>
+            </span>
+          </div>
+
+          <div className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block">
+              Peak Spend Day
+            </span>
+            <span className="text-lg font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400 mt-0.5 block">
+              {formatCurrency(monthlyDailyTrend.peakDay?.dailySpend || 0, currency)}
+            </span>
+            {monthlyDailyTrend.peakDay && monthlyDailyTrend.peakDay.dailySpend > 0 && (
+              <span className="text-[10px] text-slate-500 font-mono">
+                {monthlyDailyTrend.peakDay.shortDate}
+                {monthlyDailyTrend.peakDay.topCategory
+                  ? ` · ${monthlyDailyTrend.peakDay.topCategory}`
+                  : ''}
+              </span>
+            )}
+          </div>
+
+          <div className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block">
+              {spendingTrendCategory === 'all' && budgetSettings.dailyTarget > 0
+                ? 'High-Spend Days'
+                : 'Elevated Spend Days'}
+            </span>
+            <span className="text-lg font-bold font-mono tabular-nums text-slate-950 dark:text-white mt-0.5 block">
+              {monthlyDailyTrend.highSpendDaysCount}
+              <span className="text-xs font-normal text-slate-500 font-mono ml-1">
+                / {monthlyDailyTrend.daysInMonth}d
+              </span>
+            </span>
+            {monthlyDailyTrend.highSpendThreshold > 0 && (
+              <span className="text-[10px] text-slate-500 font-mono">
+                Above {formatCurrency(monthlyDailyTrend.highSpendThreshold, currency)}/day
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Recharts LineChart */}
+        {monthlyDailyTrend.txTotal > 0 ? (
+          <div className="space-y-4">
+            <div className="w-full h-72 sm:h-80 select-none pt-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={monthlyDailyTrend.points}
+                  margin={{ top: 14, right: 18, left: 0, bottom: 6 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke={theme === 'light' ? '#e2e8f0' : '#1e293b'}
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="shortDate"
+                    stroke={theme === 'light' ? '#64748b' : '#94a3b8'}
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={{ stroke: theme === 'light' ? '#cbd5e1' : '#334155' }}
+                    interval={4}
+                  />
+                  <YAxis
+                    stroke={theme === 'light' ? '#64748b' : '#94a3b8'}
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={{ stroke: theme === 'light' ? '#cbd5e1' : '#334155' }}
+                    tickFormatter={(val) => {
+                      const sym = CURRENCY_SYMBOLS[currency] || '$';
+                      return val >= 1000 ? `${sym}${(val / 1000).toFixed(1)}k` : `${sym}${val}`;
+                    }}
+                    width={58}
+                  />
+                  {showDailyTargetLine &&
+                    spendingTrendCategory === 'all' &&
+                    budgetSettings.dailyTarget > 0 && (
+                      <ReferenceLine
+                        y={budgetSettings.dailyTarget}
+                        stroke="#f59e0b"
+                        strokeDasharray="4 4"
+                        strokeWidth={1.5}
+                        label={{
+                          value: `Target: ${formatCurrency(budgetSettings.dailyTarget, currency)}`,
+                          fill: theme === 'light' ? '#b45309' : '#fbbf24',
+                          fontSize: 10,
+                          position: 'insideTopRight',
+                        }}
+                      />
+                    )}
+                  <RechartsTooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const pt = payload[0]?.payload;
+                        if (!pt) return null;
+                        const lineColor =
+                          spendingTrendCategory === 'all'
+                            ? '#10b981'
+                            : CATEGORY_COLORS[spendingTrendCategory]?.bar || '#10b981';
+
+                        return (
+                          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3 rounded-xl shadow-xl text-xs font-mono space-y-1.5 min-w-[220px]">
+                            <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 dark:border-slate-800">
+                              <span className="font-bold text-slate-900 dark:text-white">
+                                {pt.shortDate}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-sans">
+                                {pt.txCount} {pt.txCount === 1 ? 'transaction' : 'transactions'}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-sans text-[11px]">
+                                <span
+                                  className="w-2 h-2 rounded-full"
+                                  style={{ backgroundColor: pt.isHighSpend ? '#f43f5e' : lineColor }}
+                                />
+                                <span>Daily Spend:</span>
+                              </span>
+                              <span
+                                className={`font-bold tabular-nums ${
+                                  pt.isHighSpend
+                                    ? 'text-rose-600 dark:text-rose-400'
+                                    : 'text-slate-950 dark:text-white'
+                                }`}
+                              >
+                                {formatCurrency(pt.dailySpend, currency)}
+                              </span>
+                            </div>
+
+                            {pt.isHighSpend && (
+                              <div className="text-[10px] font-sans font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                <span>
+                                  {pt.isPeakDay ? 'Monthly peak spend day' : 'High-spend spike day'}
+                                </span>
+                              </div>
+                            )}
+
+                            {showTrendRollingAvg && (
+                              <div className="flex items-center justify-between">
+                                <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-sans text-[11px]">
+                                  <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                                  <span>7-Day Avg:</span>
+                                </span>
+                                <span className="font-semibold text-indigo-600 dark:text-indigo-400 tabular-nums">
+                                  {formatCurrency(pt.rollingAvg, currency)}
+                                </span>
+                              </div>
+                            )}
+
+                            {pt.topCategory && spendingTrendCategory === 'all' && (
+                              <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] font-sans">
+                                <span className="text-slate-500">Top category:</span>
+                                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                                  {pt.topCategory} ({formatCurrency(pt.topCategoryAmount, currency)})
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <RechartsLegend
+                    content={() => {
+                      const lineColor =
+                        spendingTrendCategory === 'all'
+                          ? '#10b981'
+                          : CATEGORY_COLORS[spendingTrendCategory]?.bar || '#10b981';
+                      return (
+                        <div className="flex flex-wrap items-center justify-center gap-5 pt-3 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="w-4 h-0.5 inline-block rounded-full"
+                              style={{ backgroundColor: lineColor }}
+                            />
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">
+                              {spendingTrendCategory === 'all'
+                                ? 'Daily Spending'
+                                : `${spendingTrendCategory} Daily Spend`}
+                            </span>
+                          </div>
+                          {monthlyDailyTrend.highSpendDaysCount > 0 && (
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
+                              <span className="font-medium text-slate-600 dark:text-slate-400">
+                                High-Spend Spike
+                              </span>
+                            </div>
+                          )}
+                          {showTrendRollingAvg && (
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-4 h-0.5 inline-block rounded-full"
+                                style={{ borderTop: '2px dashed #6366f1' }}
+                              />
+                              <span className="font-medium text-slate-600 dark:text-slate-400">
+                                7-Day Moving Avg
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="dailySpend"
+                    name="Daily Spending"
+                    stroke={
+                      spendingTrendCategory === 'all'
+                        ? '#10b981'
+                        : CATEGORY_COLORS[spendingTrendCategory]?.bar || '#10b981'
+                    }
+                    strokeWidth={2.5}
+                    dot={(dotProps: any) => {
+                      const { cx, cy, payload } = dotProps;
+                      if (typeof cx !== 'number' || typeof cy !== 'number' || !payload) {
+                        return <g key={`empty-${dotProps.index}`} />;
+                      }
+                      const baseColor =
+                        spendingTrendCategory === 'all'
+                          ? '#10b981'
+                          : CATEGORY_COLORS[spendingTrendCategory]?.bar || '#10b981';
+                      const isHigh = Boolean(payload.isHighSpend);
+                      const isPeak = Boolean(payload.isPeakDay);
+                      const r = isPeak ? 5.5 : isHigh ? 4.5 : 2.75;
+                      const fill = isHigh ? '#f43f5e' : baseColor;
+
+                      return (
+                        <circle
+                          key={`trend-dot-${payload.day}`}
+                          cx={cx}
+                          cy={cy}
+                          r={r}
+                          fill={fill}
+                          stroke={theme === 'light' ? '#ffffff' : '#0f172a'}
+                          strokeWidth={isHigh ? 2 : 1.5}
+                        />
+                      );
+                    }}
+                    activeDot={{
+                      r: 6,
+                      fill:
+                        spendingTrendCategory === 'all'
+                          ? '#10b981'
+                          : CATEGORY_COLORS[spendingTrendCategory]?.bar || '#10b981',
+                      stroke: '#ffffff',
+                      strokeWidth: 2,
+                    }}
+                  />
+                  {showTrendRollingAvg && (
+                    <Line
+                      type="monotone"
+                      dataKey="rollingAvg"
+                      name="7-Day Moving Avg"
+                      stroke="#6366f1"
+                      strokeWidth={2}
+                      strokeDasharray="4 4"
+                      dot={false}
+                      activeDot={{
+                        r: 4,
+                        fill: '#6366f1',
+                        stroke: '#ffffff',
+                        strokeWidth: 1.5,
+                      }}
+                    />
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Identified High-Spend Periods */}
+            {monthlyDailyTrend.highSpendPeriods.length > 0 && (
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                    <span>Identified High-Spend Periods</span>
+                  </span>
+                  <span className="text-[11px] font-mono tabular-nums text-slate-500">
+                    Days exceeding {formatCurrency(monthlyDailyTrend.highSpendThreshold, currency)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {monthlyDailyTrend.highSpendPeriods.slice(0, 3).map((period) => (
+                    <div
+                      key={period.id}
+                      className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-lg flex items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900 dark:text-white truncate">
+                          {period.label}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {period.dayCount} {period.dayCount === 1 ? 'day' : 'consecutive days'}
+                          {period.topCategory ? ` · ${period.topCategory}` : ''}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 font-mono tabular-nums">
+                        <div className="font-bold text-rose-600 dark:text-rose-400">
+                          {formatCurrency(period.totalSpend, currency)}
+                        </div>
+                        {period.dayCount > 1 && (
+                          <div className="text-[10px] text-slate-500">
+                            Peak {formatCurrency(period.peakSpend, currency)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="p-8 text-center bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-200 dark:border-slate-800">
+            <Activity className="w-8 h-8 text-slate-400 mx-auto mb-2 opacity-60" />
+            <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+              No spending recorded for {formatMonthYear(selectedYearMonth)}
+            </h4>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+              Log expenses in {formatMonthYear(selectedYearMonth)} or clear active filters to visualize the daily spending trend.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* ---------------------------------------------------------------------- */}
@@ -2677,361 +3184,6 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
             </ResponsiveContainer>
           </div>
         </div>
-      </div>
-
-      {/* ---------------------------------------------------------------------- */}
-      {/* SPENDING TREND: DAILY SPENDING OVER SELECTED MONTH (RECHARTS LINE)     */}
-      {/* ---------------------------------------------------------------------- */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 shadow-xs transition-colors space-y-5">
-        {/* Header & Overlay Toggles */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
-                <Activity className="w-4 h-4" />
-              </div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
-                Spending Trend — {formatMonthYear(selectedYearMonth)}
-              </h3>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                {monthlyDailyTrend.txTotal} {monthlyDailyTrend.txTotal === 1 ? 'tx' : 'txs'}
-              </span>
-            </div>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-              Day-by-day spending trajectory across {formatMonthYear(selectedYearMonth)} to pinpoint high-spend spikes alongside category analytics
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowTrendRollingAvg((prev) => !prev)}
-              className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors flex items-center gap-1.5 ${
-                showTrendRollingAvg
-                  ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800'
-                  : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300'
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  showTrendRollingAvg ? 'bg-indigo-500' : 'bg-slate-400'
-                }`}
-              />
-              <span>7-Day Moving Avg</span>
-            </button>
-
-            {spendingTrendCategory === 'all' && budgetSettings.dailyTarget > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowDailyTargetLine((prev) => !prev)}
-                className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors flex items-center gap-1.5 ${
-                  showDailyTargetLine
-                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800'
-                    : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300'
-                }`}
-              >
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    showDailyTargetLine ? 'bg-amber-500' : 'bg-slate-400'
-                  }`}
-                />
-                <span>Daily Target ({formatCurrency(budgetSettings.dailyTarget, currency)})</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Category Filter Pills to complement category analytics */}
-        {monthlyDailyTrend.availableCategories.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setSpendingTrendCategory('all')}
-              className={`px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors ${
-                spendingTrendCategory === 'all'
-                  ? 'bg-emerald-500 text-slate-950 border-emerald-500 font-semibold shadow-2xs'
-                  : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-              }`}
-            >
-              All Categories
-            </button>
-            {monthlyDailyTrend.availableCategories.map((cat) => {
-              const active = spendingTrendCategory === cat;
-              const catColor = CATEGORY_COLORS[cat]?.bar || '#10b981';
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setSpendingTrendCategory(active ? 'all' : cat)}
-                  className={`px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors flex items-center gap-1.5 ${
-                    active
-                      ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-950 border-slate-900 dark:border-white font-semibold shadow-2xs'
-                      : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                  }`}
-                >
-                  <span
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ backgroundColor: catColor }}
-                  />
-                  <span>{cat}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Quick Summary Strip */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block">
-              {spendingTrendCategory === 'all' ? 'Month Total' : `${spendingTrendCategory} Total`}
-            </span>
-            <span className="text-lg font-bold font-mono tabular-nums text-slate-950 dark:text-white mt-0.5 block">
-              {formatCurrency(monthlyDailyTrend.totalSpend, currency)}
-            </span>
-          </div>
-
-          <div className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block">
-              Daily Average
-            </span>
-            <span className="text-lg font-bold font-mono tabular-nums text-slate-950 dark:text-white mt-0.5 block">
-              {formatCurrency(monthlyDailyTrend.avgDailySpend, currency)}
-              <span className="text-[11px] font-normal text-slate-500 font-sans">/day</span>
-            </span>
-          </div>
-
-          <div className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block">
-              Peak Spend Day
-            </span>
-            <span className="text-lg font-bold font-mono tabular-nums text-slate-950 dark:text-white mt-0.5 block">
-              {formatCurrency(monthlyDailyTrend.peakDay?.dailySpend || 0, currency)}
-            </span>
-            {monthlyDailyTrend.peakDay && monthlyDailyTrend.peakDay.dailySpend > 0 && (
-              <span className="text-[10px] text-slate-500 font-mono">
-                on {monthlyDailyTrend.peakDay.shortDate}
-              </span>
-            )}
-          </div>
-
-          <div className="p-3 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl">
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block">
-              {spendingTrendCategory === 'all' ? 'Days Over Target' : 'Active Spend Days'}
-            </span>
-            <span className="text-lg font-bold font-mono tabular-nums text-slate-950 dark:text-white mt-0.5 block">
-              {spendingTrendCategory === 'all'
-                ? monthlyDailyTrend.daysOverTarget
-                : monthlyDailyTrend.activeDaysCount}
-              <span className="text-xs font-normal text-slate-500 font-mono ml-1">
-                / {monthlyDailyTrend.daysInMonth}d
-              </span>
-            </span>
-          </div>
-        </div>
-
-        {/* Recharts LineChart */}
-        {monthlyDailyTrend.txTotal > 0 ? (
-          <div className="w-full h-72 sm:h-80 select-none pt-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={monthlyDailyTrend.points}
-                margin={{ top: 14, right: 18, left: 0, bottom: 6 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke={theme === 'light' ? '#e2e8f0' : '#1e293b'}
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="shortDate"
-                  stroke={theme === 'light' ? '#64748b' : '#94a3b8'}
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={{ stroke: theme === 'light' ? '#cbd5e1' : '#334155' }}
-                  interval={4}
-                />
-                <YAxis
-                  stroke={theme === 'light' ? '#64748b' : '#94a3b8'}
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={{ stroke: theme === 'light' ? '#cbd5e1' : '#334155' }}
-                  tickFormatter={(val) => {
-                    const sym = CURRENCY_SYMBOLS[currency] || '$';
-                    return val >= 1000 ? `${sym}${(val / 1000).toFixed(1)}k` : `${sym}${val}`;
-                  }}
-                  width={58}
-                />
-                {showDailyTargetLine &&
-                  spendingTrendCategory === 'all' &&
-                  budgetSettings.dailyTarget > 0 && (
-                    <ReferenceLine
-                      y={budgetSettings.dailyTarget}
-                      stroke="#f59e0b"
-                      strokeDasharray="4 4"
-                      strokeWidth={1.5}
-                      label={{
-                        value: `Target: ${formatCurrency(budgetSettings.dailyTarget, currency)}`,
-                        fill: theme === 'light' ? '#b45309' : '#fbbf24',
-                        fontSize: 10,
-                        position: 'insideTopRight',
-                      }}
-                    />
-                  )}
-                <RechartsTooltip
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const pt = payload[0]?.payload;
-                      if (!pt) return null;
-                      const lineColor =
-                        spendingTrendCategory === 'all'
-                          ? '#10b981'
-                          : CATEGORY_COLORS[spendingTrendCategory]?.bar || '#10b981';
-
-                      return (
-                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3 rounded-xl shadow-xl text-xs font-mono space-y-1.5 min-w-[210px]">
-                          <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 dark:border-slate-800">
-                            <span className="font-bold text-slate-900 dark:text-white">
-                              {pt.shortDate}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-sans">
-                              {pt.txCount} {pt.txCount === 1 ? 'transaction' : 'transactions'}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-sans text-[11px]">
-                              <span
-                                className="w-2 h-2 rounded-full"
-                                style={{ backgroundColor: lineColor }}
-                              />
-                              <span>Daily Spend:</span>
-                            </span>
-                            <span className="font-bold text-slate-950 dark:text-white tabular-nums">
-                              {formatCurrency(pt.dailySpend, currency)}
-                            </span>
-                          </div>
-
-                          {showTrendRollingAvg && (
-                            <div className="flex items-center justify-between">
-                              <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-sans text-[11px]">
-                                <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                                <span>7-Day Avg:</span>
-                              </span>
-                              <span className="font-semibold text-indigo-600 dark:text-indigo-400 tabular-nums">
-                                {formatCurrency(pt.rollingAvg, currency)}
-                              </span>
-                            </div>
-                          )}
-
-                          {pt.topCategory && spendingTrendCategory === 'all' && (
-                            <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] font-sans">
-                              <span className="text-slate-500">Top category:</span>
-                              <span className="font-semibold text-slate-800 dark:text-slate-200">
-                                {pt.topCategory} ({formatCurrency(pt.topCategoryAmount, currency)})
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <RechartsLegend
-                  content={() => {
-                    const lineColor =
-                      spendingTrendCategory === 'all'
-                        ? '#10b981'
-                        : CATEGORY_COLORS[spendingTrendCategory]?.bar || '#10b981';
-                    return (
-                      <div className="flex flex-wrap items-center justify-center gap-5 pt-3 text-xs">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="w-4 h-0.5 inline-block rounded-full"
-                            style={{ backgroundColor: lineColor }}
-                          />
-                          <span className="font-semibold text-slate-800 dark:text-slate-200">
-                            {spendingTrendCategory === 'all'
-                              ? 'Daily Spending'
-                              : `${spendingTrendCategory} Daily Spend`}
-                          </span>
-                        </div>
-                        {showTrendRollingAvg && (
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="w-4 h-0.5 inline-block rounded-full"
-                              style={{ borderTop: '2px dashed #6366f1' }}
-                            />
-                            <span className="font-medium text-slate-600 dark:text-slate-400">
-                              7-Day Moving Avg
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="dailySpend"
-                  name="Daily Spending"
-                  stroke={
-                    spendingTrendCategory === 'all'
-                      ? '#10b981'
-                      : CATEGORY_COLORS[spendingTrendCategory]?.bar || '#10b981'
-                  }
-                  strokeWidth={2.5}
-                  dot={{
-                    r: 3,
-                    fill:
-                      spendingTrendCategory === 'all'
-                        ? '#10b981'
-                        : CATEGORY_COLORS[spendingTrendCategory]?.bar || '#10b981',
-                    stroke: theme === 'light' ? '#ffffff' : '#0f172a',
-                    strokeWidth: 1.5,
-                  }}
-                  activeDot={{
-                    r: 6,
-                    fill:
-                      spendingTrendCategory === 'all'
-                        ? '#10b981'
-                        : CATEGORY_COLORS[spendingTrendCategory]?.bar || '#10b981',
-                    stroke: '#ffffff',
-                    strokeWidth: 2,
-                  }}
-                />
-                {showTrendRollingAvg && (
-                  <Line
-                    type="monotone"
-                    dataKey="rollingAvg"
-                    name="7-Day Moving Avg"
-                    stroke="#6366f1"
-                    strokeWidth={2}
-                    strokeDasharray="4 4"
-                    dot={false}
-                    activeDot={{
-                      r: 4,
-                      fill: '#6366f1',
-                      stroke: '#ffffff',
-                      strokeWidth: 1.5,
-                    }}
-                  />
-                )}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <div className="p-8 text-center bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-200 dark:border-slate-800">
-            <Activity className="w-8 h-8 text-slate-400 mx-auto mb-2 opacity-60" />
-            <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-              No spending recorded for {formatMonthYear(selectedYearMonth)}
-            </h4>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-              Log expenses in {formatMonthYear(selectedYearMonth)} or clear active filters to visualize the daily spending trend.
-            </p>
-          </div>
-        )}
       </div>
 
       {/* ---------------------------------------------------------------------- */}
