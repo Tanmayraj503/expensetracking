@@ -178,6 +178,10 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
   const [showCategoryForecast, setShowCategoryForecast] = useState<boolean>(false);
   const [categoryLimitFilter, setCategoryLimitFilter] = useState<'all' | 'capped' | 'attention'>('all');
 
+  // Calendar Heatmap state
+  const [heatmapCategory, setHeatmapCategory] = useState<'all' | ExpenseCategory>('all');
+  const [selectedHeatmapDate, setSelectedHeatmapDate] = useState<string | null>(null);
+
   const currency = budgetSettings.currency;
 
   const fetchInsights = async () => {
@@ -218,6 +222,8 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
   useEffect(() => {
     fetchInsights();
     setSpendingTrendCategory('all');
+    setHeatmapCategory('all');
+    setSelectedHeatmapDate(null);
   }, [selectedYearMonth]);
 
   // Available months from expense logs
@@ -753,6 +759,177 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
       highSpendDaysCount: points.filter((p) => p.isHighSpend).length,
     };
   }, [expenses, selectedYearMonth, spendingTrendCategory, budgetSettings.dailyTarget, forecast.daysElapsed]);
+
+  // --------------------------------------------------------------------------
+  // Calendar-Based Expenditure Intensity Heatmap (Selected Month Sun–Sat Grid)
+  // --------------------------------------------------------------------------
+  const calendarHeatmap = useMemo(() => {
+    const [yearNum, monthNum] = selectedYearMonth.split('-').map(Number);
+    const daysInMonth = getDaysInMonth(selectedYearMonth);
+    const firstWeekday = new Date(yearNum, monthNum - 1, 1).getDay(); // 0 = Sun..6 = Sat
+
+    const monthExpenses = expenses.filter((e) => e.date.startsWith(selectedYearMonth));
+    const catTotals = new Map<ExpenseCategory, number>();
+    monthExpenses.forEach((e) => {
+      catTotals.set(e.category, (catTotals.get(e.category) || 0) + e.amount);
+    });
+    const availableCategories = Array.from(catTotals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([cat]) => cat);
+
+    const activeExpenses =
+      heatmapCategory === 'all'
+        ? monthExpenses
+        : monthExpenses.filter((e) => e.category === heatmapCategory);
+
+    const byDate = new Map<string, Expense[]>();
+    activeExpenses.forEach((exp) => {
+      const list = byDate.get(exp.date) || [];
+      list.push(exp);
+      byDate.set(exp.date, list);
+    });
+
+    const rawDays = Array.from({ length: daysInMonth }, (_, idx) => {
+      const day = idx + 1;
+      const dateStr = `${selectedYearMonth}-${String(day).padStart(2, '0')}`;
+      const dayExps = [...(byDate.get(dateStr) || [])].sort((a, b) => b.amount - a.amount);
+      const totalSpend = Math.round(dayExps.reduce((s, e) => s + e.amount, 0) * 100) / 100;
+      return {
+        day,
+        dateStr,
+        totalSpend,
+        expenses: dayExps,
+        txCount: dayExps.length,
+        weekdayIndex: (firstWeekday + idx) % 7,
+      };
+    });
+
+    const activeAmounts = rawDays
+      .filter((d) => d.totalSpend > 0)
+      .map((d) => d.totalSpend)
+      .sort((a, b) => a - b);
+
+    const totalMonthSpend = Math.round(
+      rawDays.reduce((s, d) => s + d.totalSpend, 0) * 100
+    ) / 100;
+    const activeDaysCount = activeAmounts.length;
+    const meanActiveSpend = activeDaysCount > 0 ? totalMonthSpend / activeDaysCount : 0;
+
+    let medianActiveSpend = 0;
+    if (activeDaysCount > 0) {
+      const mid = Math.floor(activeDaysCount / 2);
+      medianActiveSpend =
+        activeDaysCount % 2 === 1
+          ? activeAmounts[mid]
+          : (activeAmounts[mid - 1] + activeAmounts[mid]) / 2;
+    }
+
+    let stdDevActive = 0;
+    if (activeDaysCount >= 2) {
+      const variance =
+        activeAmounts.reduce((sum, val) => sum + Math.pow(val - meanActiveSpend, 2), 0) /
+        activeDaysCount;
+      stdDevActive = Math.sqrt(variance);
+    }
+
+    const dailyTarget = heatmapCategory === 'all' ? budgetSettings.dailyTarget || 0 : 0;
+    const baselineRef =
+      dailyTarget > 0
+        ? dailyTarget
+        : medianActiveSpend > 0
+        ? medianActiveSpend
+        : meanActiveSpend;
+
+    const spikeThreshold =
+      baselineRef > 0
+        ? Math.round(
+            Math.max(
+              baselineRef * 1.65,
+              activeDaysCount >= 3 && stdDevActive > 0 ? meanActiveSpend + stdDevActive : 0
+            ) * 100
+          ) / 100
+        : 0;
+
+    const maxSpend = activeAmounts.length > 0 ? activeAmounts[activeAmounts.length - 1] : 0;
+
+    type IntensityTier = 0 | 1 | 2 | 3 | 4;
+    const days = rawDays.map((d) => {
+      let tier: IntensityTier = 0;
+      let tierLabel = 'No Spend';
+
+      if (d.totalSpend > 0) {
+        if (baselineRef <= 0) {
+          tier = 1;
+          tierLabel = 'Low';
+        } else {
+          const ratio = d.totalSpend / baselineRef;
+          if ((spikeThreshold > 0 && d.totalSpend >= spikeThreshold) || ratio >= 1.75) {
+            tier = 4;
+            tierLabel = 'Unusually High';
+          } else if (ratio >= 1.0) {
+            tier = 3;
+            tierLabel = 'Elevated';
+          } else if (ratio >= 0.45) {
+            tier = 2;
+            tierLabel = 'Moderate';
+          } else {
+            tier = 1;
+            tierLabel = 'Low';
+          }
+        }
+      }
+
+      const intensityPct = maxSpend > 0 ? Math.min(100, (d.totalSpend / maxSpend) * 100) : 0;
+      const fullDateLabel = new Date(yearNum, monthNum - 1, d.day).toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+
+      return {
+        ...d,
+        tier,
+        tierLabel,
+        intensityPct,
+        fullDateLabel,
+        isSpike: tier === 4,
+      };
+    });
+
+    const trailingBlanks = (7 - ((firstWeekday + daysInMonth) % 7)) % 7;
+    const spikeDays = days
+      .filter((d) => d.isSpike)
+      .sort((a, b) => b.totalSpend - a.totalSpend);
+    const peakDay =
+      [...days].filter((d) => d.totalSpend > 0).sort((a, b) => b.totalSpend - a.totalSpend)[0] ||
+      null;
+
+    // Weekday average spend distribution (Sun..Sat)
+    const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const weekdaySummary = weekdayNames.map((name, idx) => {
+      const matching = days.filter((d) => d.weekdayIndex === idx);
+      const total = matching.reduce((s, d) => s + d.totalSpend, 0);
+      const avg = matching.length > 0 ? total / matching.length : 0;
+      return { name, total, avg };
+    });
+    const heaviestWeekday = [...weekdaySummary].sort((a, b) => b.avg - a.avg)[0] || null;
+
+    return {
+      days,
+      leadingBlanks: firstWeekday,
+      trailingBlanks,
+      availableCategories,
+      totalMonthSpend,
+      activeDaysCount,
+      daysInMonth,
+      baselineRef,
+      spikeThreshold,
+      maxSpend,
+      spikeDays,
+      peakDay,
+      heaviestWeekday,
+    };
+  }, [expenses, selectedYearMonth, heatmapCategory, budgetSettings.dailyTarget]);
 
   // --------------------------------------------------------------------------
   // Month-over-Month (MoM) Spending Comparison (Selected vs. Previous Month)
@@ -1462,6 +1639,343 @@ export const InsightsView: React.FC<InsightsViewProps> = ({
             </p>
           </div>
         )}
+      </div>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* CALENDAR EXPENDITURE INTENSITY HEATMAP                                 */}
+      {/* ---------------------------------------------------------------------- */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 shadow-xs transition-colors space-y-5">
+        {/* Header & Category Filter */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                Daily Expenditure Intensity Heatmap — {formatMonthYear(selectedYearMonth)}
+              </h3>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+              Calendar intensity map highlighting unusually high-spending days against your{' '}
+              {heatmapCategory === 'all' && budgetSettings.dailyTarget > 0
+                ? `${formatCurrency(budgetSettings.dailyTarget, currency)}/day target`
+                : 'monthly baseline'}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <select
+              value={heatmapCategory}
+              onChange={(e) => {
+                setHeatmapCategory(e.target.value as 'all' | ExpenseCategory);
+                setSelectedHeatmapDate(null);
+              }}
+              aria-label="Filter calendar heatmap by category"
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 rounded-lg px-3 py-1.5 focus:outline-hidden focus:border-emerald-500 transition-colors"
+            >
+              <option value="all">All Categories</option>
+              {calendarHeatmap.availableCategories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Summary Strip + Gradient Scale Legend */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl text-xs">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+            <div>
+              <span className="text-slate-500 dark:text-slate-400">Active Days: </span>
+              <span className="font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                {calendarHeatmap.activeDaysCount}/{calendarHeatmap.daysInMonth}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-500 dark:text-slate-400">Unusual Spike Days: </span>
+              <span
+                className={`font-bold font-mono tabular-nums ${
+                  calendarHeatmap.spikeDays.length > 0
+                    ? 'text-rose-600 dark:text-rose-400'
+                    : 'text-slate-900 dark:text-white'
+                }`}
+              >
+                {calendarHeatmap.spikeDays.length}
+              </span>
+            </div>
+            {calendarHeatmap.heaviestWeekday && calendarHeatmap.heaviestWeekday.avg > 0 && (
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">Heaviest Weekday: </span>
+                <span className="font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                  {calendarHeatmap.heaviestWeekday.name} (
+                  {formatCurrency(calendarHeatmap.heaviestWeekday.avg, currency)} avg)
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* 5-Step Intensity Gradient Legend */}
+          <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
+            <span>$0</span>
+            <div className="flex items-center gap-1" aria-label="Expenditure intensity scale">
+              <span
+                title="No spend"
+                className="w-4 h-4 rounded-xs bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+              />
+              <span
+                title="Low intensity"
+                className="w-4 h-4 rounded-xs bg-emerald-100 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-800"
+              />
+              <span
+                title="Moderate intensity"
+                className="w-4 h-4 rounded-xs bg-emerald-300/80 dark:bg-emerald-700/70 border border-emerald-400 dark:border-emerald-600"
+              />
+              <span
+                title="Elevated intensity"
+                className="w-4 h-4 rounded-xs bg-amber-200 dark:bg-amber-800/70 border border-amber-400 dark:border-amber-600"
+              />
+              <span
+                title="Unusually high spike"
+                className="w-4 h-4 rounded-xs bg-rose-500/80 dark:bg-rose-600 border border-rose-600 dark:border-rose-400"
+              />
+            </div>
+            <span className="font-medium text-rose-600 dark:text-rose-400">Spike</span>
+          </div>
+        </div>
+
+        {/* Main Grid: 7-Column Calendar + Day Inspector */}
+        {(() => {
+          const activeInspectDate =
+            selectedHeatmapDate || calendarHeatmap.peakDay?.dateStr || calendarHeatmap.days[0]?.dateStr;
+          const inspectedDay =
+            calendarHeatmap.days.find((d) => d.dateStr === activeInspectDate) ||
+            calendarHeatmap.days[0];
+          const sym = CURRENCY_SYMBOLS[currency] || '$';
+
+          const tierStyles: Record<number, string> = {
+            0: 'bg-slate-50 dark:bg-slate-950/50 border-slate-200/80 dark:border-slate-800/80 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700',
+            1: 'bg-emerald-50 dark:bg-emerald-950/45 border-emerald-200 dark:border-emerald-800/60 text-emerald-950 dark:text-emerald-200 hover:border-emerald-400',
+            2: 'bg-emerald-200/75 dark:bg-emerald-800/55 border-emerald-300 dark:border-emerald-600/80 text-emerald-950 dark:text-emerald-100 hover:border-emerald-500',
+            3: 'bg-amber-100 dark:bg-amber-900/45 border-amber-300 dark:border-amber-700/70 text-amber-950 dark:text-amber-100 hover:border-amber-500',
+            4: 'bg-rose-500/20 dark:bg-rose-600/35 border-rose-400 dark:border-rose-500 text-rose-950 dark:text-rose-100 hover:border-rose-600',
+          };
+
+          return (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+              {/* Calendar Grid (7 columns Sun..Sat) */}
+              <div className="lg:col-span-8 space-y-2">
+                <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-semibold text-slate-500 dark:text-slate-400 pb-1">
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((wd) => (
+                    <div key={wd}>{wd}</div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-7 gap-1.5">
+                  {/* Leading Blank Cells */}
+                  {Array.from({ length: calendarHeatmap.leadingBlanks }).map((_, i) => (
+                    <div
+                      key={`lead-${i}`}
+                      className="h-14 sm:h-16 rounded-lg bg-slate-100/40 dark:bg-slate-950/20 border border-dashed border-slate-200/60 dark:border-slate-800/40"
+                    />
+                  ))}
+
+                  {/* Day Cells */}
+                  {calendarHeatmap.days.map((dayObj) => {
+                    const isSelected = inspectedDay?.dateStr === dayObj.dateStr;
+                    const compactSpend =
+                      dayObj.totalSpend === 0
+                        ? '—'
+                        : dayObj.totalSpend >= 1000
+                        ? `${sym}${(dayObj.totalSpend / 1000).toFixed(1)}k`
+                        : `${sym}${Math.round(dayObj.totalSpend)}`;
+
+                    return (
+                      <button
+                        key={dayObj.dateStr}
+                        type="button"
+                        onClick={() => setSelectedHeatmapDate(dayObj.dateStr)}
+                        title={`${dayObj.fullDateLabel}: ${formatCurrency(dayObj.totalSpend, currency)} (${dayObj.tierLabel}, ${dayObj.txCount} txs)`}
+                        className={`relative h-14 sm:h-16 p-1.5 rounded-lg border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                          tierStyles[dayObj.tier]
+                        } ${
+                          isSelected
+                            ? 'ring-2 ring-emerald-500 dark:ring-emerald-400 ring-offset-1 ring-offset-white dark:ring-offset-slate-900 z-10'
+                            : ''
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="text-[11px] font-mono tabular-nums font-semibold leading-none">
+                            {dayObj.day}
+                          </span>
+                          {dayObj.isSpike && (
+                            <AlertTriangle
+                              className="w-3 h-3 text-rose-600 dark:text-rose-300 shrink-0"
+                              aria-label="High spend spike"
+                            />
+                          )}
+                        </div>
+
+                        <div className="w-full">
+                          <span
+                            className={`block font-mono tabular-nums text-[10px] sm:text-[11px] font-bold truncate leading-tight ${
+                              dayObj.totalSpend === 0 ? 'opacity-50 font-normal' : ''
+                            }`}
+                          >
+                            {compactSpend}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+
+                  {/* Trailing Blank Cells */}
+                  {Array.from({ length: calendarHeatmap.trailingBlanks }).map((_, i) => (
+                    <div
+                      key={`trail-${i}`}
+                      className="h-14 sm:h-16 rounded-lg bg-slate-100/40 dark:bg-slate-950/20 border border-dashed border-slate-200/60 dark:border-slate-800/40"
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Right Column: Day Intensity Inspector + Unusual High-Spending Days */}
+              <div className="lg:col-span-4 space-y-3">
+                {inspectedDay && (
+                  <div className="p-4 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
+                    <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
+                      <div>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                          Selected Day
+                        </span>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                          {inspectedDay.fullDateLabel}
+                        </h4>
+                      </div>
+                      <span
+                        className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
+                          inspectedDay.tier === 4
+                            ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800/60'
+                            : inspectedDay.tier === 3
+                            ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                            : inspectedDay.tier >= 1
+                            ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                            : 'bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'
+                        }`}
+                      >
+                        {inspectedDay.tierLabel}
+                      </span>
+                    </div>
+
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-2xl font-bold font-mono tabular-nums text-slate-950 dark:text-white">
+                        {formatCurrency(inspectedDay.totalSpend, currency)}
+                      </span>
+                      <span className="text-xs font-mono tabular-nums text-slate-500">
+                        {inspectedDay.txCount} {inspectedDay.txCount === 1 ? 'tx' : 'txs'}
+                      </span>
+                    </div>
+
+                    {calendarHeatmap.baselineRef > 0 && inspectedDay.totalSpend > 0 && (
+                      <div className="text-[11px] font-mono tabular-nums text-slate-600 dark:text-slate-400">
+                        {(() => {
+                          const pctVsBase =
+                            ((inspectedDay.totalSpend - calendarHeatmap.baselineRef) /
+                              calendarHeatmap.baselineRef) *
+                            100;
+                          return (
+                            <span>
+                              {pctVsBase >= 0 ? '+' : ''}
+                              {pctVsBase.toFixed(0)}% vs{' '}
+                              {heatmapCategory === 'all' && budgetSettings.dailyTarget > 0
+                                ? 'daily target'
+                                : 'typical day'}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {inspectedDay.expenses.length > 0 ? (
+                      <div className="space-y-1.5 pt-1 max-h-44 overflow-y-auto pr-1">
+                        {inspectedDay.expenses.map((exp) => (
+                          <div
+                            key={exp.id}
+                            className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="min-w-0 flex items-center gap-2">
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{
+                                  backgroundColor: CATEGORY_COLORS[exp.category]?.bar || '#10b981',
+                                }}
+                              />
+                              <div className="min-w-0">
+                                <div className="font-medium text-slate-900 dark:text-white truncate">
+                                  {exp.merchant}
+                                </div>
+                                <div className="text-[10px] text-slate-500 truncate">
+                                  {exp.category}
+                                </div>
+                              </div>
+                            </div>
+                            <span className="font-mono tabular-nums font-semibold text-slate-900 dark:text-white shrink-0">
+                              {formatCurrency(exp.amount, currency)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 text-[11px] text-slate-500 text-center">
+                        No expenses logged on {inspectedDay.fullDateLabel}.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Top Unusual Spike Days Quick-Jump */}
+                {calendarHeatmap.spikeDays.length > 0 && (
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                        <span>Unusually High-Spending Days</span>
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {calendarHeatmap.spikeDays.slice(0, 4).map((spike) => (
+                        <button
+                          key={spike.dateStr}
+                          type="button"
+                          onClick={() => setSelectedHeatmapDate(spike.dateStr)}
+                          className={`w-full px-2.5 py-1.5 rounded-lg border text-left flex items-center justify-between gap-2 text-xs transition-colors ${
+                            inspectedDay?.dateStr === spike.dateStr
+                              ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-700'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-rose-300 dark:hover:border-rose-700'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <span className="font-semibold text-slate-900 dark:text-white block truncate">
+                              {spike.fullDateLabel}
+                            </span>
+                            <span className="text-[10px] text-slate-500 truncate block">
+                              {spike.expenses[0]?.merchant || spike.expenses[0]?.category || `${spike.txCount} txs`}
+                              {spike.txCount > 1 ? ` +${spike.txCount - 1} more` : ''}
+                            </span>
+                          </div>
+                          <span className="font-mono tabular-nums font-bold text-rose-600 dark:text-rose-400 shrink-0">
+                            {formatCurrency(spike.totalSpend, currency)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ---------------------------------------------------------------------- */}
