@@ -83,6 +83,7 @@ export interface SavingsGoal {
   tag?: string; // Tag identifier used to match and accumulate savings from transactions (e.g. "Emergency Fund", "Vacation")
   monthlyContribution?: number; // Monthly budget allocation reserved toward this savings goal
   linkedToBudget?: boolean; // Explicitly links this goal to monthly budget & category cap tracking
+  recurringRuleId?: string; // Optional ID of a linked RecurringRule for automated recurring contributions
 }
 
 export interface BudgetSettings {

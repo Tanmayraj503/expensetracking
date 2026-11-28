@@ -339,15 +339,19 @@ export default function App() {
   const handleSaveRecurringRule = (
     ruleData: Omit<RecurringRule, 'id' | 'createdAt'>,
     existingId?: string
-  ) => {
+  ): RecurringRule => {
     if (existingId) {
-      const updated = recurringRules.map((r) =>
-        r.id === existingId
-          ? { ...ruleData, id: existingId, createdAt: r.createdAt }
-          : r
-      );
+      let savedRule: RecurringRule | undefined;
+      const updated = recurringRules.map((r) => {
+        if (r.id === existingId) {
+          savedRule = { ...ruleData, id: existingId, createdAt: r.createdAt };
+          return savedRule;
+        }
+        return r;
+      });
       updateRecurringRules(updated);
       showToast(`Updated schedule for ${ruleData.merchant}`, 'success');
+      return savedRule || { ...ruleData, id: existingId, createdAt: new Date().toISOString() };
     } else {
       const newRule: RecurringRule = {
         ...ruleData,
@@ -371,6 +375,7 @@ export default function App() {
         `Created ${newRule.frequency} schedule for ${newRule.merchant}`,
         'success'
       );
+      return newRule;
     }
   };
 
@@ -590,6 +595,8 @@ export default function App() {
               onEditExpense={handleOpenEditExpense}
               onDeleteExpense={handleDeleteExpense}
               onQuickLogExpense={handleQuickLogExpense}
+              onOpenBudgetModal={handleOpenBudgetModal}
+              recurringRules={recurringRules}
             />
           )}
 
@@ -603,6 +610,7 @@ export default function App() {
               onUpdateBudgetSettings={updateBudgetSettings}
               theme={theme}
               onOpenPdfExport={(p, ym) => handleOpenPdfModal(p || 'monthly', ym)}
+              recurringRules={recurringRules}
             />
           )}
 
@@ -721,6 +729,8 @@ export default function App() {
         initialTab={budgetModalInitialTab}
         expenses={expenses}
         selectedYearMonth={selectedYearMonth}
+        recurringRules={recurringRules}
+        onSaveRecurringRule={handleSaveRecurringRule}
       />
 
       {/* Spending Statement PDF Export Modal */}

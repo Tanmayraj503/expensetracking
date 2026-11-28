@@ -21,6 +21,7 @@ import {
   Activity,
   Tag,
   FileDown,
+  Repeat,
 } from 'lucide-react';
 import {
   PieChart as RechartsPieChart,
@@ -29,7 +30,7 @@ import {
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
 } from 'recharts';
-import { Expense, BudgetSettings, MonthSummary, SavingsGoal, EndOfMonthProjection } from '../types';
+import { Expense, BudgetSettings, MonthSummary, SavingsGoal, EndOfMonthProjection, RecurringRule } from '../types';
 import {
   formatCurrency,
   formatMonthYear,
@@ -49,10 +50,11 @@ interface MonthlyTrackerProps {
   selectedYearMonth: string;
   onSelectYearMonth: (ym: string) => void;
   budgetSettings: BudgetSettings;
-  onOpenBudgetModal: (initialTab?: 'budget' | 'goals') => void;
+  onOpenBudgetModal: (initialTab?: 'budget' | 'goals' | 'assistant') => void;
   onUpdateBudgetSettings?: (newSettings: BudgetSettings) => void;
   theme?: 'dark' | 'light';
   onOpenPdfExport?: (initialPeriod?: 'weekly' | 'monthly' | 'yearly', initialYearMonth?: string) => void;
+  recurringRules?: RecurringRule[];
 }
 
 export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
@@ -64,6 +66,7 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
   onUpdateBudgetSettings,
   theme = 'dark',
   onOpenPdfExport,
+  recurringRules = [],
 }) => {
   const [hoveredDayPoint, setHoveredDayPoint] = useState<{
     day: number;
@@ -1009,6 +1012,9 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
               const remaining = Math.max(0, goal.targetAmount - savings.totalAmount);
               const catColors = CATEGORY_COLORS[goal.category];
               const activeTag = goal.tag || goal.name;
+              const linkedRule = goal.recurringRuleId
+                ? recurringRules.find((r) => r.id === goal.recurringRuleId)
+                : undefined;
 
               // Calculate this month's spending in this category to show connection
               const monthSpendInCat = monthExpenses
@@ -1049,11 +1055,21 @@ export const MonthlyTracker: React.FC<MonthlyTrackerProps> = ({
                       </span>
                     </div>
 
-                    {/* Target Date Pill */}
-                    {goal.targetDate && (
-                      <div className="flex items-center gap-1.5 mt-2 text-[11px] text-slate-500 font-mono">
-                        <Calendar className="w-3 h-3 text-slate-400" />
-                        <span>Target: {goal.targetDate}</span>
+                    {/* Deadline & Linked Recurring Rule Meta */}
+                    {(goal.targetDate || linkedRule) && (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] font-mono">
+                        {goal.targetDate && (
+                          <span className="inline-flex items-center gap-1 text-slate-500">
+                            <Calendar className="w-3 h-3 text-slate-400" />
+                            Deadline: {goal.targetDate}
+                          </span>
+                        )}
+                        {linkedRule && (
+                          <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
+                            <Repeat className="w-3 h-3" />
+                            {linkedRule.merchant} · {formatCurrency(linkedRule.amount, currency)}/{linkedRule.frequency}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>

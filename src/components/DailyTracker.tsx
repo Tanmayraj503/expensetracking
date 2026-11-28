@@ -25,8 +25,10 @@ import {
   Tag,
   X,
   Receipt,
+  PiggyBank,
+  Target,
 } from 'lucide-react';
-import { Expense, BudgetSettings, DaySummary, FrequentExpensePreset, ExpenseCategory, PaymentMethod } from '../types';
+import { Expense, BudgetSettings, DaySummary, FrequentExpensePreset, ExpenseCategory, PaymentMethod, RecurringRule } from '../types';
 import { ReceiptPreviewModal } from './ReceiptPreviewModal';
 import {
   formatCurrency,
@@ -34,6 +36,7 @@ import {
   formatFullDate,
   calculateDailySummaries,
   getDaysInMonth,
+  calculateGoalSavings,
 } from '../utils/formatters';
 import { CATEGORIES, CATEGORY_COLORS, PAYMENT_METHODS } from '../data/sampleExpenses';
 import { loadFrequentExpenses, saveFrequentExpenses, DEFAULT_FREQUENT_EXPENSES } from '../utils/storage';
@@ -48,6 +51,8 @@ interface DailyTrackerProps {
   onEditExpense: (expense: Expense) => void;
   onDeleteExpense: (id: string) => void;
   onQuickLogExpense?: (expense: Omit<Expense, 'id'>) => void;
+  onOpenBudgetModal?: (initialTab?: 'budget' | 'goals' | 'assistant') => void;
+  recurringRules?: RecurringRule[];
 }
 
 export const DailyTracker: React.FC<DailyTrackerProps> = ({
@@ -60,6 +65,8 @@ export const DailyTracker: React.FC<DailyTrackerProps> = ({
   onEditExpense,
   onDeleteExpense,
   onQuickLogExpense,
+  onOpenBudgetModal,
+  recurringRules = [],
 }) => {
   const [hoveredDay, setHoveredDay] = useState<DaySummary | null>(null);
   const [frequentPresets, setFrequentPresets] = useState<FrequentExpensePreset[]>(() => loadFrequentExpenses());
@@ -258,6 +265,25 @@ export const DailyTracker: React.FC<DailyTrackerProps> = ({
   const chartHeight = 180;
   const targetY = chartHeight - (dailyTarget / maxDaySpend) * chartHeight;
 
+  // Portfolio Savings Goals summary for main dashboard progress bar
+  const savingsGoals = budgetSettings.savingsGoals || [];
+  const goalSummaries = savingsGoals.map((goal) => ({
+    goal,
+    savings: calculateGoalSavings(goal, expenses),
+    linkedRule: goal.recurringRuleId
+      ? recurringRules.find((r) => r.id === goal.recurringRuleId)
+      : undefined,
+  }));
+  const totalSavingsSaved = goalSummaries.reduce((sum, item) => sum + item.savings.totalSaved, 0);
+  const totalSavingsTarget = savingsGoals.reduce((sum, g) => sum + Math.max(0, g.targetAmount), 0);
+  const totalSavingsPercent =
+    totalSavingsTarget > 0
+      ? Math.min(100, Math.round((totalSavingsSaved / totalSavingsTarget) * 1000) / 10)
+      : 0;
+  const totalSavingsRemaining = Math.max(0, totalSavingsTarget - totalSavingsSaved);
+  const completedGoalsCount = goalSummaries.filter((item) => item.savings.isCompleted).length;
+  const linkedRecurringCount = goalSummaries.filter((item) => Boolean(item.linkedRule)).length;
+
   return (
     <div className="space-y-6">
       {/* 4-Item Daily KPI Strip */}
@@ -362,6 +388,145 @@ export const DailyTracker: React.FC<DailyTrackerProps> = ({
             {((zeroSpendDaysCount / daysElapsed) * 100).toFixed(0)}% of days disciplined
           </div>
         </div>
+      </div>
+
+      {/* Total Savings Goals Progress Bar on Main Dashboard */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs transition-colors">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 shrink-0">
+              <PiggyBank className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                  Total Savings Progress
+                </h3>
+                {savingsGoals.length > 0 && (
+                  <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 px-1.5 py-0.5 rounded font-semibold tabular-nums">
+                    {savingsGoals.length} {savingsGoals.length === 1 ? 'goal' : 'goals'}
+                    {linkedRecurringCount > 0 ? ` · ${linkedRecurringCount} recurring` : ''}
+                    {completedGoalsCount > 0 ? ` · ${completedGoalsCount} met` : ''}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                Combined progress across all savings targets, deadlines, and linked recurring contributions
+              </p>
+            </div>
+          </div>
+
+          {onOpenBudgetModal && (
+            <button
+              type="button"
+              onClick={() => onOpenBudgetModal('goals')}
+              className="px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800/60 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap self-start sm:self-auto"
+            >
+              <Target className="w-3.5 h-3.5" />
+              <span>{savingsGoals.length > 0 ? 'Manage Goals' : 'Add Savings Goal'}</span>
+            </button>
+          )}
+        </div>
+
+        {savingsGoals.length > 0 ? (
+          <div className="mt-4 space-y-4">
+            {/* Portfolio Progress Bar */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div className="font-mono tabular-nums">
+                  <span className="text-xl sm:text-2xl font-bold text-slate-950 dark:text-white">
+                    {formatCurrency(totalSavingsSaved, currency)}
+                  </span>
+                  <span className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 ml-1.5">
+                    of {formatCurrency(totalSavingsTarget, currency)} saved
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs font-mono tabular-nums">
+                  <span className="text-slate-500 dark:text-slate-400">
+                    {totalSavingsRemaining > 0
+                      ? `${formatCurrency(totalSavingsRemaining, currency)} remaining`
+                      : 'All targets funded'}
+                  </span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                    {totalSavingsPercent.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+
+              <div
+                className="w-full h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden border border-slate-200/70 dark:border-slate-700/70"
+                role="progressbar"
+                aria-valuenow={Math.round(totalSavingsPercent)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Total savings progress across all goals"
+              >
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, totalSavingsPercent)}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Individual Goal Quick Snapshot Strip */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {goalSummaries.slice(0, 3).map(({ goal, savings, linkedRule }) => (
+                <div
+                  key={goal.id}
+                  className="p-3 rounded-lg bg-slate-50/80 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 flex flex-col justify-between gap-2"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                        {goal.name}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 mt-0.5 text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                        {goal.targetDate && <span>Due {goal.targetDate}</span>}
+                        {linkedRule && (
+                          <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                            <Repeat className="w-2.5 h-2.5" />
+                            {formatCurrency(linkedRule.amount, currency)}/{linkedRule.frequency}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-xs font-mono font-bold tabular-nums text-emerald-600 dark:text-emerald-400 shrink-0">
+                      {savings.percentage.toFixed(0)}%
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, savings.percentage)}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                      <span>{formatCurrency(savings.totalSaved, currency)}</span>
+                      <span>{formatCurrency(goal.targetAmount, currency)}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 p-4 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-dashed border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              No savings goals configured yet. Set a target amount, deadline, and optional recurring contribution rule to track progress here.
+            </p>
+            {onOpenBudgetModal && (
+              <button
+                type="button"
+                onClick={() => onOpenBudgetModal('goals')}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors whitespace-nowrap self-start sm:self-auto"
+              >
+                Create First Goal
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Frequent Expenses Quick-Log Section */}

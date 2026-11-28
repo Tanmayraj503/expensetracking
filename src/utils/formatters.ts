@@ -8,6 +8,7 @@ import {
   EndOfMonthProjection,
   CategoryProjection,
   SavingsGoal,
+  RecurringRule,
 } from '../types';
 import { CATEGORIES } from '../data/sampleExpenses';
 
@@ -427,9 +428,21 @@ export function matchExpenseToGoalTag(expense: Expense, goalTagOrName: string): 
   });
 }
 
+export function getRecurringMonthlyEquivalent(rule: RecurringRule): number {
+  switch (rule.frequency) {
+    case 'daily':
+      return Math.round(rule.amount * 30 * 100) / 100;
+    case 'weekly':
+      return Math.round(((rule.amount * 52) / 12) * 100) / 100;
+    case 'monthly':
+    default:
+      return Math.round(rule.amount * 100) / 100;
+  }
+}
+
 /**
- * Calculates total savings for a goal identified through matching transaction tags,
- * plus any manual base/deposit amount.
+ * Calculates total savings for a goal identified through matching transaction tags
+ * or a linked recurring contribution rule, plus any manual base/deposit amount.
  */
 export function calculateGoalSavings(
   goal: SavingsGoal,
@@ -437,17 +450,27 @@ export function calculateGoalSavings(
 ): {
   baseAmount: number;
   taggedAmount: number;
+  recurringAmount: number;
   totalSaved: number;
   totalAmount: number;
   matchingCount: number;
+  recurringCount: number;
   percentage: number;
   remainingAmount: number;
   isCompleted: boolean;
   matchingExpenses: Expense[];
 } {
   const targetTag = goal.tag || goal.name;
-  const matchingExpenses = expenses.filter((e) => matchExpenseToGoalTag(e, targetTag));
+  const matchingExpenses = expenses.filter((e) => {
+    const matchesTag = matchExpenseToGoalTag(e, targetTag);
+    const matchesRecurring = Boolean(goal.recurringRuleId && e.recurringRuleId === goal.recurringRuleId);
+    return matchesTag || matchesRecurring;
+  });
   const taggedAmount = matchingExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const recurringMatched = goal.recurringRuleId
+    ? matchingExpenses.filter((e) => e.recurringRuleId === goal.recurringRuleId)
+    : [];
+  const recurringAmount = recurringMatched.reduce((sum, e) => sum + e.amount, 0);
   const baseAmount = Math.max(0, goal.currentAmount || 0);
   const totalSaved = baseAmount + taggedAmount;
   const targetAmount = Math.max(1, goal.targetAmount);
@@ -458,9 +481,11 @@ export function calculateGoalSavings(
   return {
     baseAmount,
     taggedAmount,
+    recurringAmount,
     totalSaved,
     totalAmount: totalSaved,
     matchingCount: matchingExpenses.length,
+    recurringCount: recurringMatched.length,
     percentage,
     remainingAmount,
     isCompleted,

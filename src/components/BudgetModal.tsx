@@ -24,9 +24,18 @@ import {
   Sliders,
   Link2,
   Unlink,
+  Repeat,
 } from 'lucide-react';
-import { BudgetSettings, ExpenseCategory, SavingsGoal, Expense } from '../types';
-import { CATEGORIES, CATEGORY_COLORS } from '../data/sampleExpenses';
+import {
+  BudgetSettings,
+  ExpenseCategory,
+  SavingsGoal,
+  Expense,
+  RecurringRule,
+  RecurrenceFrequency,
+  PaymentMethod,
+} from '../types';
+import { CATEGORIES, CATEGORY_COLORS, PAYMENT_METHODS } from '../data/sampleExpenses';
 import {
   CURRENCY_SYMBOLS,
   formatCurrency,
@@ -34,6 +43,7 @@ import {
   calculateGoalSavings,
   calculateGoalBudgetMetrics,
   matchExpenseToGoalTag,
+  getRecurringMonthlyEquivalent,
 } from '../utils/formatters';
 
 interface BudgetModalProps {
@@ -44,6 +54,11 @@ interface BudgetModalProps {
   initialTab?: 'budget' | 'goals' | 'assistant';
   expenses?: Expense[];
   selectedYearMonth?: string;
+  recurringRules?: RecurringRule[];
+  onSaveRecurringRule?: (
+    ruleData: Omit<RecurringRule, 'id' | 'createdAt'>,
+    existingId?: string
+  ) => RecurringRule | void;
 }
 
 type OptimizationStrategy = 'balanced' | 'aggressive-savings' | 'realistic-baseline';
@@ -80,6 +95,8 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
   initialTab = 'budget',
   expenses = [],
   selectedYearMonth = '2026-10',
+  recurringRules = [],
+  onSaveRecurringRule,
 }) => {
   const [activeTab, setActiveTab] = useState<'budget' | 'goals' | 'assistant'>(initialTab);
   const [monthlyBudget, setMonthlyBudget] = useState(budgetSettings.monthlyBudget.toString());
@@ -116,6 +133,13 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
   const [goalNotes, setGoalNotes] = useState('');
   const [goalMonthlyContribution, setGoalMonthlyContribution] = useState('150');
   const [goalLinkedToBudget, setGoalLinkedToBudget] = useState(true);
+  const [goalRecurringMode, setGoalRecurringMode] = useState<'none' | 'existing' | 'create'>('none');
+  const [goalRecurringRuleId, setGoalRecurringRuleId] = useState<string>('');
+  const [newRuleMerchant, setNewRuleMerchant] = useState<string>('');
+  const [newRuleAmount, setNewRuleAmount] = useState<string>('150');
+  const [newRuleFrequency, setNewRuleFrequency] = useState<RecurrenceFrequency>('monthly');
+  const [newRuleStartDate, setNewRuleStartDate] = useState<string>('2026-10-29');
+  const [newRulePaymentMethod, setNewRulePaymentMethod] = useState<PaymentMethod>('Bank Transfer');
   const [formError, setFormError] = useState<string | null>(null);
   const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
   const [editingInlineCapGoalId, setEditingInlineCapGoalId] = useState<string | null>(null);
@@ -181,6 +205,13 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
       setIsTagUserEdited(false);
       setGoalMonthlyContribution('150');
       setGoalLinkedToBudget(true);
+      setGoalRecurringMode('none');
+      setGoalRecurringRuleId('');
+      setNewRuleMerchant('');
+      setNewRuleAmount('150');
+      setNewRuleFrequency('monthly');
+      setNewRuleStartDate('2026-10-29');
+      setNewRulePaymentMethod('Bank Transfer');
       setExpandedGoalId(null);
       setEditingInlineCapGoalId(null);
       setInlineCapValue('');
@@ -329,6 +360,13 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
     setGoalNotes(defaultNotes);
     setGoalMonthlyContribution(defaultMonthly);
     setGoalLinkedToBudget(true);
+    setGoalRecurringMode('none');
+    setGoalRecurringRuleId('');
+    setNewRuleMerchant(defaultName ? `${defaultName} Auto-Save` : '');
+    setNewRuleAmount(defaultMonthly || '150');
+    setNewRuleFrequency('monthly');
+    setNewRuleStartDate('2026-10-29');
+    setNewRulePaymentMethod('Bank Transfer');
     setFormError(null);
     setIsGoalFormOpen(true);
   };
@@ -347,6 +385,18 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
       goal.monthlyContribution !== undefined ? goal.monthlyContribution.toString() : '150'
     );
     setGoalLinkedToBudget(goal.linkedToBudget !== false);
+    const hasLinkedRule = Boolean(
+      goal.recurringRuleId && recurringRules.some((r) => r.id === goal.recurringRuleId)
+    );
+    setGoalRecurringMode(hasLinkedRule ? 'existing' : 'none');
+    setGoalRecurringRuleId(hasLinkedRule ? goal.recurringRuleId || '' : '');
+    setNewRuleMerchant(`${goal.name} Auto-Save`);
+    setNewRuleAmount(
+      goal.monthlyContribution !== undefined ? goal.monthlyContribution.toString() : '150'
+    );
+    setNewRuleFrequency('monthly');
+    setNewRuleStartDate('2026-10-29');
+    setNewRulePaymentMethod('Bank Transfer');
     setFormError(null);
     setIsGoalFormOpen(true);
   };
@@ -411,8 +461,45 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
       return;
     }
     const current = Math.max(0, parseFloat(goalCurrentAmount) || 0);
-    const monthlyContrib = Math.max(0, parseFloat(goalMonthlyContribution) || 0);
+    let monthlyContrib = Math.max(0, parseFloat(goalMonthlyContribution) || 0);
     const chosenTag = (goalTag.trim() || goalName.trim()).replace(/^#/, '');
+
+    let resolvedRecurringRuleId: string | undefined = undefined;
+    if (goalRecurringMode === 'existing') {
+      if (!goalRecurringRuleId) {
+        setFormError('Select an existing recurring rule or choose None');
+        return;
+      }
+      resolvedRecurringRuleId = goalRecurringRuleId;
+      const matchedRule = recurringRules.find((r) => r.id === goalRecurringRuleId);
+      if (matchedRule && monthlyContrib === 0) {
+        monthlyContrib = getRecurringMonthlyEquivalent(matchedRule);
+      }
+    } else if (goalRecurringMode === 'create') {
+      const ruleAmt = parseFloat(newRuleAmount);
+      if (isNaN(ruleAmt) || ruleAmt <= 0) {
+        setFormError('Recurring contribution amount must be greater than zero');
+        return;
+      }
+      const ruleLabel = newRuleMerchant.trim() || `${goalName.trim()} Auto-Save`;
+      if (onSaveRecurringRule) {
+        const createdRule = onSaveRecurringRule({
+          merchant: ruleLabel,
+          amount: Math.round(ruleAmt * 100) / 100,
+          category: goalCategory,
+          paymentMethod: newRulePaymentMethod,
+          frequency: newRuleFrequency,
+          startDate: newRuleStartDate || '2026-10-29',
+          tags: [chosenTag],
+          notes: `Automated contribution for ${goalName.trim()}`,
+          isActive: true,
+        });
+        if (createdRule && createdRule.id) {
+          resolvedRecurringRuleId = createdRule.id;
+          monthlyContrib = getRecurringMonthlyEquivalent(createdRule);
+        }
+      }
+    }
 
     if (editingGoalId) {
       setSavingsGoals((prev) =>
@@ -429,6 +516,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                 notes: goalNotes.trim() || undefined,
                 monthlyContribution: monthlyContrib,
                 linkedToBudget: goalLinkedToBudget,
+                recurringRuleId: resolvedRecurringRuleId,
               }
             : g
         )
@@ -446,6 +534,7 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
         createdAt: new Date().toISOString().slice(0, 10),
         monthlyContribution: monthlyContrib,
         linkedToBudget: goalLinkedToBudget,
+        recurringRuleId: resolvedRecurringRuleId,
       };
       setSavingsGoals((prev) => [...prev, newGoal]);
     }
@@ -454,6 +543,8 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
     setEditingGoalId(null);
     setGoalTag('');
     setIsTagUserEdited(false);
+    setGoalRecurringMode('none');
+    setGoalRecurringRuleId('');
     setFormError(null);
   };
 
@@ -1430,10 +1521,10 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Target Date */}
+                  {/* Target Date (Deadline) */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Target Completion Date
+                      Savings Deadline (Target Date)
                     </label>
                     <input
                       type="date"
@@ -1455,6 +1546,187 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                       onChange={(e) => setGoalNotes(e.target.value)}
                       className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
                     />
+                  </div>
+
+                  {/* Link to Recurring Contribution Rule */}
+                  <div className="sm:col-span-2 p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Repeat className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                          Recurring Contribution Rule
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setGoalRecurringMode('none')}
+                          className={`px-2 py-0.5 rounded-md font-medium transition-colors ${
+                            goalRecurringMode === 'none'
+                              ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-2xs font-semibold'
+                              : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                          }`}
+                        >
+                          None
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGoalRecurringMode('existing')}
+                          disabled={recurringRules.length === 0}
+                          className={`px-2 py-0.5 rounded-md font-medium transition-colors disabled:opacity-40 ${
+                            goalRecurringMode === 'existing'
+                              ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-2xs font-semibold'
+                              : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                          }`}
+                        >
+                          Link Existing ({recurringRules.length})
+                        </button>
+                        {onSaveRecurringRule && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setGoalRecurringMode('create');
+                              if (!newRuleMerchant.trim()) {
+                                setNewRuleMerchant(
+                                  goalName.trim() ? `${goalName.trim()} Auto-Save` : 'Goal Auto-Save'
+                                );
+                              }
+                              if (!newRuleAmount || parseFloat(newRuleAmount) <= 0) {
+                                setNewRuleAmount(goalMonthlyContribution || '150');
+                              }
+                            }}
+                            className={`px-2 py-0.5 rounded-md font-medium transition-colors ${
+                              goalRecurringMode === 'create'
+                                ? 'bg-emerald-500 text-slate-950 font-semibold shadow-2xs'
+                                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                            }`}
+                          >
+                            + New Rule
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {goalRecurringMode === 'existing' && (
+                      <div className="space-y-1.5">
+                        <select
+                          value={goalRecurringRuleId}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            setGoalRecurringRuleId(id);
+                            const found = recurringRules.find((r) => r.id === id);
+                            if (found) {
+                              setGoalMonthlyContribution(
+                                String(getRecurringMonthlyEquivalent(found))
+                              );
+                            }
+                          }}
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="">Select a recurring rule to link...</option>
+                          {recurringRules.map((rule) => (
+                            <option key={rule.id} value={rule.id}>
+                              {rule.merchant} · {formatCurrency(rule.amount, currency)}/{rule.frequency}{' '}
+                              ({rule.isActive ? 'Active' : 'Paused'})
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] text-slate-500">
+                          Generated entries from the linked rule automatically add to this goal&apos;s progress.
+                        </p>
+                      </div>
+                    )}
+
+                    {goalRecurringMode === 'create' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Contribution Rule Name
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Emergency Fund Auto-Transfer"
+                            value={newRuleMerchant}
+                            onChange={(e) => setNewRuleMerchant(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Amount per Cycle
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs">
+                              {currencySymbol}
+                            </span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="1"
+                              value={newRuleAmount}
+                              onChange={(e) => setNewRuleAmount(e.target.value)}
+                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg pl-6 pr-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Frequency
+                          </label>
+                          <select
+                            value={newRuleFrequency}
+                            onChange={(e) =>
+                              setNewRuleFrequency(e.target.value as RecurrenceFrequency)
+                            }
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                          >
+                            <option value="monthly">Monthly</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="daily">Daily</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Start Date
+                          </label>
+                          <input
+                            type="date"
+                            value={newRuleStartDate}
+                            onChange={(e) => setNewRuleStartDate(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Source Account / Method
+                          </label>
+                          <select
+                            value={newRulePaymentMethod}
+                            onChange={(e) =>
+                              setNewRulePaymentMethod(e.target.value as PaymentMethod)
+                            }
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                          >
+                            {PAYMENT_METHODS.map((pm) => (
+                              <option key={pm} value={pm}>
+                                {pm}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {goalRecurringMode === 'none' && (
+                      <p className="text-[11px] text-slate-500">
+                        Optional: link an automated schedule or create a recurring transfer rule to fund this goal continuously.
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -1538,6 +1810,9 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                     !isDone && budgetLink.categoryRemaining !== null && budgetLink.categoryRemaining > 0
                       ? Math.min(budgetLink.categoryRemaining, savings.remainingAmount)
                       : 0;
+                  const linkedRule = goal.recurringRuleId
+                    ? recurringRules.find((r) => r.id === goal.recurringRuleId)
+                    : undefined;
 
                   return (
                     <div
@@ -1556,10 +1831,19 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
                             {goal.targetDate && (
                               <>
                                 <span aria-hidden="true">&middot;</span>
-                                <span className="font-mono tabular-nums">Target {goal.targetDate}</span>
+                                <span className="font-mono tabular-nums">Deadline {goal.targetDate}</span>
                               </>
                             )}
                           </div>
+                          {linkedRule && (
+                            <div className="mt-1 inline-flex items-center gap-1.5 text-[11px] font-mono tabular-nums text-indigo-700 dark:text-indigo-300">
+                              <Repeat className="w-3 h-3 shrink-0" />
+                              <span>
+                                {linkedRule.merchant} · {formatCurrency(linkedRule.amount, currency)}/
+                                {linkedRule.frequency} ({linkedRule.isActive ? 'Active' : 'Paused'})
+                              </span>
+                            </div>
+                          )}
                           {goal.notes && (
                             <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 truncate">
                               {goal.notes}
